@@ -1,7 +1,9 @@
 import type { updateProfileSchema } from "@/lib/validators";
 import type { z } from "zod";
 
-export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema> & {
+	currentPassword?: string;
+};
 
 export type ProfileResponse = {
 	user: {

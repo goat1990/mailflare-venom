@@ -54,7 +54,8 @@ export async function handleJmapRequest(request: Request, env: CloudflareEnv): P
 			return new Response(JSON.stringify(response), { headers: JSON_HEADERS });
 		} catch (error) {
 			if (error instanceof JmapError) return problemResponse(error.type, 400, error.message, error.extra);
-			throw error;
+			console.error("JMAP request failed", error);
+			return problemResponse("serverFail", 500, "The request could not be completed");
 		}
 	}
 

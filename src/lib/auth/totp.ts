@@ -71,20 +71,56 @@ export async function totp(secret: string, at: number = Date.now()): Promise<str
 	return hotp(secret, totpCounter(at));
 }
 
+const STORED_COUNTER_SEPARATOR = ".";
+
+/** A code is spent once its step (or a later one) has already been accepted. */
+export function totpCounterAllowed(lastCounter: number | null, matched: number): boolean {
+	return lastCounter === null || matched > lastCounter;
+}
+
 /**
  * Accept the current step and one on either side, so a phone whose clock is a
- * few seconds off still works. Comparison is constant-time.
+ * few seconds off still works. Comparison is constant-time. Returns the matched
+ * step, or null when the code is wrong.
  */
-export async function verifyTotp(secret: string, code: string, at: number = Date.now()): Promise<boolean> {
+export async function matchTotp(secret: string, code: string, at: number = Date.now()): Promise<number | null> {
 	const candidate = code.replace(/\s+/g, "");
-	if (!/^\d{6}$/.test(candidate)) return false;
+	if (!/^\d{6}$/.test(candidate)) return null;
 	const counter = totpCounter(at);
-	let matched = false;
+	let matched: number | null = null;
 	for (const delta of [-1, 0, 1]) {
 		const expected = await hotp(secret, counter + delta);
-		if (timingSafeEqual(expected, candidate)) matched = true;
+		if (timingSafeEqual(expected, candidate)) matched = counter + delta;
 	}
 	return matched;
+}
+
+/**
+ * Accept the current step and one on either side. `lastCounter` is the last
+ * step already accepted for this secret; a code at or behind that step is
+ * rejected so the same six digits cannot be replayed inside the window.
+ */
+export async function verifyTotp(
+	secret: string,
+	code: string,
+	at: number = Date.now(),
+	lastCounter: number | null = null,
+): Promise<boolean> {
+	const matched = await matchTotp(secret, code, at);
+	return matched !== null && totpCounterAllowed(lastCounter, matched);
+}
+
+/** The secret column also remembers the last accepted step, as `secret.counter`. */
+export function splitStoredTotpSecret(stored: string): { secret: string; lastCounter: number | null } {
+	const index = stored.lastIndexOf(STORED_COUNTER_SEPARATOR);
+	if (index <= 0) return { secret: stored, lastCounter: null };
+	const counter = Number(stored.slice(index + 1));
+	if (!Number.isInteger(counter) || counter < 0) return { secret: stored, lastCounter: null };
+	return { secret: stored.slice(0, index), lastCounter: counter };
+}
+
+export function packStoredTotpSecret(secret: string, counter: number): string {
+	return `${secret}${STORED_COUNTER_SEPARATOR}${counter}`;
 }
 
 export function timingSafeEqual(a: string, b: string): boolean {

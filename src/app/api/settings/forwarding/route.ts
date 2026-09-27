@@ -4,6 +4,9 @@ import { ZodError } from "zod";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
 import { requireUser } from "@/lib/auth/cookies";
+import { hasValidSessionMutationOrigin } from "@/lib/auth/origin";
+import { verifyPassword } from "@/lib/auth/password";
+import { profileChangeNeedsCurrentPassword } from "@/lib/auth/password-reset-utils";
 import { getEnv } from "@/lib/cloudflare";
 import { getLicenseEntitlements } from "@/lib/licenses/service";
 import type { UpdateForwardingEmailInput } from "./types";
@@ -22,8 +25,16 @@ export async function PATCH(request: Request) {
 		return NextResponse.json({ error: "Invalid request" }, { status: 400 });
 	}
 
+	if (!hasValidSessionMutationOrigin(request)) {
+		return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
+	}
 	if (!(await getLicenseEntitlements(env)).canForwardEmail) {
 		return NextResponse.json({ error: "A Pro or Team license is required for email forwarding" }, { status: 403 });
+	}
+	if (profileChangeNeedsCurrentPassword(user, { resetEmail: user.resetEmail, forwardingEmail: input.forwardingEmail })) {
+		if (!input.currentPassword || !verifyPassword(input.currentPassword, user.passwordHash)) {
+			return NextResponse.json({ error: "Current password is required to change the forwarding address" }, { status: 400 });
+		}
 	}
 
 	await getDb(env)

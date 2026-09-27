@@ -67,7 +67,7 @@ function rights(mailbox: AccessibleMailbox, system: boolean) {
 	return {
 		mayReadItems: true,
 		mayAddItems: canWrite,
-		mayRemoveItems: canWrite,
+		mayRemoveItems: mailbox.permission === "full_access",
 		maySetSeen: canWrite,
 		maySetKeywords: canWrite,
 		mayCreateChild: mailbox.permission === "full_access",

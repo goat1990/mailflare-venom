@@ -1,22 +1,23 @@
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, getUserFromSession } from "@/lib/auth/session";
 
-function getBearerToken(request?: Request): string | undefined {
-	const authorization = request?.headers.get("Authorization");
-	if (!authorization?.startsWith("Bearer ")) return undefined;
-	const token = authorization.slice(7).trim();
-	return token || undefined;
+function sessionCookieFromRequest(request?: Request): string | undefined {
+	const header = request?.headers.get("Cookie");
+	if (!header) return undefined;
+	for (const part of header.split(";")) {
+		const [name, ...valueParts] = part.trim().split("=");
+		if (name === SESSION_COOKIE) {
+			const value = valueParts.join("=");
+			return value ? decodeURIComponent(value) : undefined;
+		}
+	}
+	return undefined;
 }
 
+/** The session cookie is the only browser credential. Authorization is not a session. */
 export async function getCurrentUser(env: CloudflareEnv, request?: Request) {
-	const bearerToken = getBearerToken(request);
-	if (bearerToken) {
-		const user = await getUserFromSession(env, bearerToken);
-		return user?.disabled ? null : user;
-	}
-
 	const jar = await cookies();
-	const token = jar.get(SESSION_COOKIE)?.value;
+	const token = jar.get(SESSION_COOKIE)?.value ?? sessionCookieFromRequest(request);
 	const user = await getUserFromSession(env, token);
 	return user?.disabled ? null : user;
 }

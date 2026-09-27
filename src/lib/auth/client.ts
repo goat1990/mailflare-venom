@@ -7,6 +7,8 @@ import type {
 } from "./client-types";
 
 const SESSION_STORAGE_KEY = "mailflare-session-token";
+/** Presence flag only. The session secret stays in the httpOnly cookie. */
+const CLIENT_SESSION_MARKER = "1";
 export const AUTH_SESSION_CHANGED_EVENT = "mailflare:auth-session-changed";
 
 function dispatchAuthSessionChanged(authenticated: boolean): void {
@@ -20,13 +22,15 @@ function dispatchAuthSessionChanged(authenticated: boolean): void {
 
 export function getClientSessionToken(): string | null {
 	if (typeof window === "undefined") return null;
-	return localStorage.getItem(SESSION_STORAGE_KEY);
+	const value = localStorage.getItem(SESSION_STORAGE_KEY);
+	if (!value) return null;
+	if (value === CLIENT_SESSION_MARKER) return value;
+	localStorage.setItem(SESSION_STORAGE_KEY, CLIENT_SESSION_MARKER);
+	return CLIENT_SESSION_MARKER;
 }
 
-export function setClientSessionToken(token: string): void {
-	const previousToken = localStorage.getItem(SESSION_STORAGE_KEY);
-	localStorage.setItem(SESSION_STORAGE_KEY, token);
-	if (previousToken !== token) dispatchAuthSessionChanged(true);
+export function setClientSessionToken(_token: string): void {
+	markClientSessionPresent();
 }
 
 export function clearClientSessionToken(): void {
@@ -35,12 +39,13 @@ export function clearClientSessionToken(): void {
 }
 
 export function getAuthHeaders(headers?: HeadersInit): Headers {
-	const nextHeaders = new Headers(headers);
-	const token = getClientSessionToken();
-	if (token && !nextHeaders.has("Authorization")) {
-		nextHeaders.set("Authorization", `Bearer ${token}`);
-	}
-	return nextHeaders;
+	return new Headers(headers);
+}
+
+function markClientSessionPresent(): void {
+	const previous = localStorage.getItem(SESSION_STORAGE_KEY);
+	localStorage.setItem(SESSION_STORAGE_KEY, CLIENT_SESSION_MARKER);
+	if (previous !== CLIENT_SESSION_MARKER) dispatchAuthSessionChanged(true);
 }
 
 export async function authFetch(input: RequestInfo | URL, init: AuthFetchOptions = {}): Promise<Response> {
@@ -60,6 +65,6 @@ export async function authFetch(input: RequestInfo | URL, init: AuthFetchOptions
 
 export async function persistAuthSession(response: Response): Promise<AuthSessionResponse> {
 	const data = (await response.json()) as AuthSessionResponse;
-	if (response.ok && data.token) setClientSessionToken(data.token);
+	if (response.ok && typeof window !== "undefined") markClientSessionPresent();
 	return data;
 }

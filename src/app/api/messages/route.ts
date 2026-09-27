@@ -10,6 +10,7 @@ import { getFirstEmailAddressEntry, normalizeEmailAddress } from "@/lib/email/ad
 import { buildSnippet } from "@/lib/email/parse";
 import { getMailboxAccessLevel, listAccessibleMailboxes } from "@/lib/mailboxes/access";
 import { tracksAccountIdentity } from "@/lib/profile/identity-utils";
+import { resolveMessageListScope } from "@/lib/jmap/message-scope";
 import { buildSearchConditions } from "@/lib/search/conditions";
 
 export async function GET(request: Request) {
@@ -38,17 +39,19 @@ export async function GET(request: Request) {
 	const db = getDb(env);
 	const accessibleMailboxes = await listAccessibleMailboxes(db, user);
 	const accessibleMailboxIds = accessibleMailboxes.map((mailbox) => mailbox.id);
+	const listScope = resolveMessageListScope({ mailboxId, accessibleMailboxIds });
+	if (listScope.kind === "empty") {
+		return NextResponse.json({ messages: [], total: 0, limit, offset, grouped: groupByThread });
+	}
 	const conditions: SQL[] = [];
-	if (mailboxId) {
-		const access = await getMailboxAccessLevel(db, user, mailboxId);
+	if (listScope.kind === "mailbox") {
+		const access = await getMailboxAccessLevel(db, user, listScope.mailboxId);
 		if (!access?.canRead) {
 			return NextResponse.json({ error: "Mailbox not found" }, { status: 404 });
 		}
-		conditions.push(eq(messages.mailboxId, mailboxId));
-	} else if (accessibleMailboxIds.length > 0) {
-		conditions.push(inArray(messages.mailboxId, accessibleMailboxIds));
+		conditions.push(eq(messages.mailboxId, listScope.mailboxId));
 	} else {
-		conditions.push(eq(messages.userId, user.id));
+		conditions.push(inArray(messages.mailboxId, listScope.mailboxIds));
 	}
 	if (direction === "inbound" || direction === "outbound") {
 		conditions.push(eq(messages.direction, direction));
@@ -148,11 +151,9 @@ export async function GET(request: Request) {
 	const threadIds = Array.from(new Set(rows.map((row) => row.threadId).filter((id): id is string => !!id)));
 	const threadCounts = new Map<string, { total: number; unread: number }>();
 	if (threadIds.length > 0) {
-		const scope = mailboxId
-			? eq(messages.mailboxId, mailboxId)
-			: accessibleMailboxIds.length > 0
-				? inArray(messages.mailboxId, accessibleMailboxIds)
-				: eq(messages.userId, user.id);
+		const scope = listScope.kind === "mailbox"
+			? eq(messages.mailboxId, listScope.mailboxId)
+			: inArray(messages.mailboxId, listScope.mailboxIds);
 		const countRows = await db
 			.select({
 				threadId: messages.threadId,

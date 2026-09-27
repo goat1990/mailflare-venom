@@ -5,7 +5,7 @@ import { mfaRecoveryCodes, users } from "@/db/schema";
 import { getBranding } from "@/lib/branding/service";
 import { consumeRecoveryCode, countUnusedRecoveryCodes, issueRecoveryCodes } from "@/lib/auth/recovery-codes";
 import { deleteUserSessions } from "@/lib/auth/session";
-import { buildOtpauthUrl, generateTotpSecret, verifyTotp } from "@/lib/auth/totp";
+import { buildOtpauthUrl, generateTotpSecret, matchTotp, packStoredTotpSecret, splitStoredTotpSecret, totpCounterAllowed } from "@/lib/auth/totp";
 import type { MfaEnrollment, MfaStatus } from "@/lib/auth/mfa-types";
 
 export async function getMfaStatus(env: CloudflareEnv, user: { id: string; totpEnabled: boolean; totpConfirmedAt: Date | null }): Promise<MfaStatus> {
@@ -39,10 +39,14 @@ export async function confirmMfaEnrollment(
 ): Promise<{ ok: true; recoveryCodes: string[] } | { ok: false; error: string }> {
 	if (!user.totpSecret) return { ok: false, error: "Start enrolment first" };
 	if (user.totpEnabled) return { ok: false, error: "Two-factor authentication is already on" };
-	if (!(await verifyTotp(user.totpSecret, code))) return { ok: false, error: "That code did not match. Check the time on your device and try again." };
+	const stored = splitStoredTotpSecret(user.totpSecret);
+	const matched = await matchTotp(stored.secret, code);
+	if (matched === null || !totpCounterAllowed(stored.lastCounter, matched)) {
+		return { ok: false, error: "That code did not match. Check the time on your device and try again." };
+	}
 
 	const db = getDb(env);
-	await db.update(users).set({ totpEnabled: true, totpConfirmedAt: new Date() }).where(eq(users.id, user.id));
+	await db.update(users).set({ totpSecret: packStoredTotpSecret(stored.secret, matched), totpEnabled: true, totpConfirmedAt: new Date() }).where(eq(users.id, user.id));
 	const recoveryCodes = await issueRecoveryCodes(env, user.id);
 	// Other sessions predate the second factor; make them sign in again with it.
 	await deleteUserSessions(env, user.id, currentSessionToken);
@@ -62,7 +66,13 @@ export async function verifySecondFactor(
 	code: string,
 ): Promise<"totp" | "recovery" | null> {
 	if (!user.totpEnabled || !user.totpSecret) return null;
-	if (await verifyTotp(user.totpSecret, code)) return "totp";
+	const stored = splitStoredTotpSecret(user.totpSecret);
+	const matched = await matchTotp(stored.secret, code);
+	if (matched !== null) {
+		if (!totpCounterAllowed(stored.lastCounter, matched)) return null;
+		await getDb(env).update(users).set({ totpSecret: packStoredTotpSecret(stored.secret, matched) }).where(eq(users.id, user.id));
+		return "totp";
+	}
 	if (await consumeRecoveryCode(env, user.id, code)) return "recovery";
 	return null;
 }

@@ -1,3 +1,8 @@
+/** A limiter that throws is not "no limit". Login stops until it answers again. */
+export function loginAllowedAfterLimiterError(): boolean {
+	return false;
+}
+
 export async function allowLoginAttempt(env: CloudflareEnv, request: Request): Promise<boolean> {
 	if (!env.LOGIN_RATE_LIMIT) return true;
 	const ip = request.headers.get("cf-connecting-ip")?.trim() || "unknown";
@@ -6,6 +11,6 @@ export async function allowLoginAttempt(env: CloudflareEnv, request: Request): P
 		return outcome.success;
 	} catch (error) {
 		console.warn("Login rate limiter unavailable", error);
-		return true;
+		return loginAllowedAfterLimiterError();
 	}
 }

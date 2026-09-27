@@ -69,7 +69,7 @@ export async function POST(request: Request) {
 	for (const message of selectedMessages) {
 		if (!message.mailboxId) continue;
 		const access = await getMailboxAccessLevel(db, user, message.mailboxId);
-		const canUpdate = payload.action === "read" || payload.action === "unread" ? access?.canRead : access?.canManage;
+		const canUpdate = payload.action === "read" || payload.action === "unread" ? access?.canSendOnBehalf : access?.canManage;
 		if (!canUpdate) continue;
 		allowedMessageIds.push(message.id);
 	}
