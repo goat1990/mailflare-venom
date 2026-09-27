@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import type { getDb } from "@/db";
 import { messages } from "@/db/schema";
 import { newId } from "@/lib/ids";
@@ -43,29 +43,41 @@ export function buildReplyReferences(parentReferences: string[], parentMessageId
 	return [ids[0], ...ids.slice(ids.length - (MAX - 1))];
 }
 
+/** Parents looked up per message; each costs two bound parameters and D1 allows 100 per statement. */
+const MAX_PARENT_CANDIDATES = 20;
+
 /**
  * Work out which conversation a message belongs to. A reply names its parent in
  * In-Reply-To or References; if that parent is stored in the same mailbox, the
- * new message joins the parent's thread. Otherwise it starts a thread keyed by
- * its own Message-ID so later replies can find it.
+ * new message joins the parent's thread. The closest parent wins: In-Reply-To,
+ * then References from its newest entry back, since older entries may belong to
+ * a conversation this one branched from. Otherwise the message starts a thread
+ * keyed by its own Message-ID so later replies can find it.
  */
 export async function resolveThreadId(db: Db, input: ResolveThreadInput): Promise<string> {
-	const candidates = new Set<string>();
-	for (const id of [normalizeMessageId(input.inReplyTo), ...(input.references ?? [])]) {
-		if (id) candidates.add(id);
-	}
+	const candidates = [...new Set(
+		[normalizeMessageId(input.inReplyTo), ...[...(input.references ?? [])].reverse().map((id) => normalizeMessageId(id))]
+			.filter((id): id is string => !!id),
+	)].slice(0, MAX_PARENT_CANDIDATES);
 
-	if (input.mailboxId && candidates.size > 0) {
+	if (input.mailboxId && candidates.length > 0) {
 		// Stored Message-IDs may or may not include their angle brackets.
-		const variants = Array.from(candidates).flatMap((id) => [id, `<${id}>`]);
-		const [parent] = await db
-			.select({ threadId: messages.threadId, providerMessageId: messages.providerMessageId })
+		const variants = candidates.flatMap((id) => [id, `<${id}>`]);
+		const rows = await db
+			.select({ id: messages.id, threadId: messages.threadId, providerMessageId: messages.providerMessageId })
 			.from(messages)
 			.where(and(eq(messages.mailboxId, input.mailboxId), inArray(messages.providerMessageId, variants)))
-			.orderBy(asc(messages.createdAt))
-			.limit(1);
+			.orderBy(asc(messages.createdAt), asc(messages.id));
+		const parent = candidates
+			.map((id) => rows.find((row) => normalizeMessageId(row.providerMessageId) === id))
+			.find((row) => row !== undefined);
+		if (parent?.threadId) return parent.threadId;
 		if (parent) {
-			return parent.threadId ?? normalizeMessageId(parent.providerMessageId) ?? newId("thr");
+			// Lists group by coalesce(threadId, id), so a parent without a thread would stay apart
+			// from its replies; it takes the key they are about to share.
+			const threadId = normalizeMessageId(parent.providerMessageId) ?? newId("thr");
+			await db.update(messages).set({ threadId }).where(and(eq(messages.id, parent.id), isNull(messages.threadId)));
+			return threadId;
 		}
 	}
 
