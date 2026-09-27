@@ -40,6 +40,13 @@ function likePattern(value: string): string {
 	return `%${likeEscape(value)}%`;
 }
 
+function parseFilterDate(value: unknown, field: string): Date {
+	if (typeof value !== "string" && typeof value !== "number") throw invalidArguments(`${field} is not a date`);
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) throw invalidArguments(`${field} is not a date`);
+	return date;
+}
+
 /**
  * RFC 8621 §4.4.1 `header`: `[name]` means the header is present, `[name, value]`
  * that its value equals that string. Only the headers Mailflare keeps as columns
@@ -76,13 +83,15 @@ function conditionToSql(condition: FilterCondition, accessible: Set<string>): SQ
 		parts.push(mailboxRefCondition(ref));
 	}
 	if (condition.inMailboxOtherThan) {
+		if (!Array.isArray(condition.inMailboxOtherThan)) throw invalidArguments("inMailboxOtherThan must be a list of mailbox ids");
 		for (const id of condition.inMailboxOtherThan) {
 			const ref = decodeMailboxRef(id);
-			if (ref && accessible.has(ref.mailboxId)) parts.push(not(mailboxRefCondition(ref)));
+			if (!ref || !accessible.has(ref.mailboxId)) throw invalidArguments(`Unknown mailbox ${id}`);
+			parts.push(not(mailboxRefCondition(ref)));
 		}
 	}
-	if (condition.before) parts.push(lt(messages.createdAt, new Date(condition.before)));
-	if (condition.after) parts.push(gte(messages.createdAt, new Date(condition.after)));
+	if (condition.before) parts.push(lt(messages.createdAt, parseFilterDate(condition.before, "before")));
+	if (condition.after) parts.push(gte(messages.createdAt, parseFilterDate(condition.after, "after")));
 	if (condition.hasKeyword) parts.push(keywordCondition(condition.hasKeyword, true));
 	if (condition.notKeyword) parts.push(keywordCondition(condition.notKeyword, false));
 	if (condition.someInThreadHaveKeyword) parts.push(keywordCondition(condition.someInThreadHaveKeyword, true));
@@ -119,16 +128,56 @@ function conditionToSql(condition: FilterCondition, accessible: Set<string>): SQ
 	return parts;
 }
 
+const FILTER_CONDITION_KEYS = new Set([
+	"inMailbox",
+	"inMailboxOtherThan",
+	"before",
+	"after",
+	"minSize",
+	"maxSize",
+	"hasKeyword",
+	"notKeyword",
+	"allInThreadHaveKeyword",
+	"someInThreadHaveKeyword",
+	"noneInThreadHaveKeyword",
+	"text",
+	"from",
+	"to",
+	"cc",
+	"bcc",
+	"subject",
+	"body",
+	"hasAttachment",
+	"header",
+]);
+
+/** RFC 8620 §5.5: a property or operator the server cannot apply is an error, never a silent match-all. */
+function rejectUnknownFilter(filter: Filter): void {
+	if ("operator" in filter) {
+		for (const key of Object.keys(filter)) {
+			if (key !== "operator" && key !== "conditions") throw unsupportedFilter(`Cannot filter on ${key}`);
+		}
+		if (!Array.isArray(filter.conditions) || filter.conditions.length === 0) throw unsupportedFilter("Filter operator has no conditions");
+		return;
+	}
+	const keys = Object.keys(filter);
+	if (keys.length === 0) throw unsupportedFilter("Filter condition is empty");
+	for (const key of keys) {
+		if (!FILTER_CONDITION_KEYS.has(key)) throw unsupportedFilter(`Cannot filter on ${key}`);
+	}
+}
+
 /** FilterOperator trees become nested AND/OR/NOT; a bare condition is an AND of its fields. */
 export function filterToSql(filter: Filter | null | undefined, accessible: Set<string>): SQL | undefined {
 	if (!filter) return undefined;
+	rejectUnknownFilter(filter);
 	if ("operator" in filter) {
-		const children = (filter.conditions ?? []).map((child) => filterToSql(child, accessible)).filter((part): part is SQL => !!part);
-		if (children.length === 0) return undefined;
+		const children = filter.conditions.map((child) => filterToSql(child, accessible)).filter((part): part is SQL => !!part);
+		if (children.length === 0) throw unsupportedFilter("Filter condition could not be applied");
 		if (filter.operator === "AND") return and(...children);
 		if (filter.operator === "OR") return or(...children);
 		if (filter.operator === "NOT") return not(and(...children)!);
-		throw invalidArguments(`Unknown operator ${String(filter.operator)}`);
+		throw unsupportedFilter(`Cannot filter with operator ${String(filter.operator)}`);
 	}
 	const parts = conditionToSql(filter, accessible);
 	return parts.length ? and(...parts) : undefined;

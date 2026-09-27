@@ -6,6 +6,7 @@ import { authenticateApiKey, requireScope } from "@/lib/api/auth";
 import { getDb } from "@/db";
 import { messages, users } from "@/db/schema";
 import { getMailboxAccessLevel, listAccessibleMailboxIds } from "@/lib/mailboxes/access";
+import { resolveMessageListScope } from "@/lib/jmap/message-scope";
 import { buildSearchConditions } from "@/lib/search/conditions";
 
 export async function GET(request: Request) {
@@ -38,13 +39,9 @@ export async function GET(request: Request) {
 		conditions.push(eq(messages.mailboxId, mailboxId));
 	} else {
 		const accessibleMailboxIds = (await listAccessibleMailboxIds(db, user)).filter((id) => !auth.mailboxIds || auth.mailboxIds.includes(id));
-		if (accessibleMailboxIds.length > 0) {
-			conditions.push(inArray(messages.mailboxId, accessibleMailboxIds));
-		} else if (auth.mailboxIds) {
-			return NextResponse.json({ messages: [] });
-		} else {
-			conditions.push(eq(messages.userId, auth.userId));
-		}
+		const listScope = resolveMessageListScope({ accessibleMailboxIds });
+		if (listScope.kind !== "mailboxes") return NextResponse.json({ messages: [] });
+		conditions.push(inArray(messages.mailboxId, listScope.mailboxIds));
 	}
 	if (direction === "inbound" || direction === "outbound") {
 		conditions.push(eq(messages.direction, direction));

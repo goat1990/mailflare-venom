@@ -30,3 +30,8 @@ export async function consumeLoginChallenge(env: CloudflareEnv, token: string): 
 	const db = getDb(env);
 	await db.delete(loginChallenges).where(eq(loginChallenges.tokenHash, await hashSessionToken(token)));
 }
+
+export async function deleteUserLoginChallenges(env: CloudflareEnv, userId: string): Promise<void> {
+	const db = getDb(env);
+	await db.delete(loginChallenges).where(eq(loginChallenges.userId, userId));
+}

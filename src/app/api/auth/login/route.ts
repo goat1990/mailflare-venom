@@ -58,7 +58,6 @@ export async function POST(request: Request) {
 	await recordAuthActivity(env, { action: "auth.login", userId: user.id, request });
 	const response = NextResponse.json({
 		ok: true,
-		token,
 		redirect: "/inbox",
 	});
 	response.headers.set("Cache-Control", "no-store");

@@ -24,7 +24,7 @@ export async function POST(
 	if (!message?.mailboxId) return NextResponse.json({ error: "Message not found" }, { status: 404 });
 
 	const access = await getMailboxAccessLevel(db, user, message.mailboxId);
-	if (!access?.canRead) return NextResponse.json({ error: "Message not found" }, { status: 404 });
+	if (!access?.canSendOnBehalf) return NextResponse.json({ error: "Message not found" }, { status: 404 });
 
 	const starred = !message.starred;
 	await db.update(messages).set({ starred }).where(eq(messages.id, message.id));

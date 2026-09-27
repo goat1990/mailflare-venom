@@ -15,6 +15,7 @@ import { importFlags, parseReceivedAt, resolveDraftsMailbox } from "./email-impo
 import { filterToSql, mailboxRefCondition, sortToSql } from "./email-query";
 import { getEmailState } from "./state";
 import { listAccessibleMailboxIdSet, listJmapMailboxes } from "./access";
+import { jmapMailboxScope } from "./message-scope";
 import { deleteUpload, readUpload, storeRawDraftMime } from "./blobs";
 import type { Comparator, EmailAddressObject, Filter, JmapContext, JmapMethodHandler, JmapSetError, MailboxRef } from "./types";
 import type { AttachmentContent } from "@/lib/email/attachment-types";
@@ -72,7 +73,8 @@ async function insertDraft(ctx: JmapContext, row: DraftRow): Promise<string> {
 
 async function scope(ctx: JmapContext) {
 	const ids = Array.from(await listAccessibleMailboxIdSet(ctx));
-	return { ids, condition: ids.length ? inArray(messages.mailboxId, ids) : ctx.auth.mailboxIds ? sql`1 = 0` : eq(messages.userId, ctx.auth.userId) };
+	if (jmapMailboxScope(ids) === "empty") return { ids, condition: sql`1 = 0` };
+	return { ids, condition: inArray(messages.mailboxId, ids) };
 }
 
 export async function loadMessages(ctx: JmapContext, ids: string[]): Promise<MessageRow[]> {
@@ -256,7 +258,9 @@ export const emailSet: JmapMethodHandler = async (ctx, args) => {
 	const oldState = await getEmailState(ctx);
 	if (args.ifInState && args.ifInState !== oldState) return { type: "stateMismatch" };
 	const accessible = await listAccessibleMailboxIdSet(ctx);
-	const writable = new Set((await listJmapMailboxes(ctx)).filter((row) => row.permission !== "read_only").map((row) => row.id));
+	const mailboxes = await listJmapMailboxes(ctx);
+	const writable = new Set(mailboxes.filter((row) => row.permission !== "read_only").map((row) => row.id));
+	const managers = new Set(mailboxes.filter((row) => row.permission === "full_access").map((row) => row.id));
 	const created: Record<string, unknown> = {};
 	const notCreated: Record<string, unknown> = {};
 	const updated: Record<string, null> = {};
@@ -293,6 +297,10 @@ export const emailSet: JmapMethodHandler = async (ctx, args) => {
 			notUpdated[id] = move.error;
 			continue;
 		}
+		if (move && move.status === "trash" && !managers.has(row.mailboxId)) {
+			notUpdated[id] = { type: "forbidden" };
+			continue;
+		}
 		const flags = keywordsFromPatch(patch);
 		const set: Partial<MessageRow> = {};
 		if (flags.read !== undefined) set.read = flags.read;
@@ -316,7 +324,7 @@ export const emailSet: JmapMethodHandler = async (ctx, args) => {
 			notDestroyed[id] = { type: "notFound" };
 			continue;
 		}
-		if (!writable.has(row.mailboxId)) {
+		if (!managers.has(row.mailboxId)) {
 			notDestroyed[id] = { type: "forbidden" };
 			continue;
 		}

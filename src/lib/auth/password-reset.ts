@@ -1,13 +1,14 @@
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
-import { passwordResetTokens, users } from "@/db/schema";
+import { apiKeys, passwordResetTokens, users } from "@/db/schema";
 import { newId } from "@/lib/ids";
 import { hashPassword } from "@/lib/auth/password";
+import { deleteUserLoginChallenges } from "@/lib/auth/login-challenge";
 import { deleteUserSessions, hashSessionToken } from "@/lib/auth/session";
 import { getBranding } from "@/lib/branding/service";
 import { sendSystemEmail } from "@/lib/email/system-mail";
 import { createAuditLog } from "@/lib/mailboxes/audit";
-import { escapeHtml } from "@/lib/auth/password-reset-utils";
+import { escapeHtml, revokedCredentialKinds } from "@/lib/auth/password-reset-utils";
 
 const TOKEN_MINUTES = 30;
 
@@ -21,6 +22,7 @@ export async function requestPasswordReset(env: CloudflareEnv, email: string, or
 	const [user] = await db.select().from(users).where(eq(users.email, email.trim().toLowerCase())).limit(1);
 	if (!user || user.disabled || !user.resetEmail) return;
 
+	await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, user.id));
 	const token = newId("prt");
 	await db.insert(passwordResetTokens).values({
 		id: newId(),
@@ -56,7 +58,7 @@ export async function completePasswordReset(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
 	const db = getDb(env);
 	const [row] = await db
-		.select({ id: passwordResetTokens.id, userId: passwordResetTokens.userId })
+		.select({ userId: passwordResetTokens.userId })
 		.from(passwordResetTokens)
 		.where(
 			and(
@@ -69,8 +71,7 @@ export async function completePasswordReset(
 	if (!row) return { ok: false, error: "This reset link is invalid or has expired. Request a new one." };
 
 	await db.update(users).set({ passwordHash: hashPassword(newPassword) }).where(eq(users.id, row.userId));
-	await db.update(passwordResetTokens).set({ usedAt: new Date() }).where(eq(passwordResetTokens.id, row.id));
-	await deleteUserSessions(env, row.userId);
+	await revokeCredentialsAfterPasswordChange(env, row.userId);
 	await createAuditLog(env, {
 		actorUserId: row.userId,
 		targetUserId: row.userId,
@@ -78,4 +79,24 @@ export async function completePasswordReset(
 		metadata: { ipAddress: request.headers.get("cf-connecting-ip") ?? "unknown" },
 	});
 	return { ok: true };
+}
+
+/** Drop every other way into the account: reset links, challenges, API keys, and sessions. */
+export async function revokeCredentialsAfterPasswordChange(
+	env: CloudflareEnv,
+	userId: string,
+	keepSessionToken?: string,
+): Promise<void> {
+	const kinds = new Set(revokedCredentialKinds());
+	const db = getDb(env);
+	if (kinds.has("passwordResetTokens")) {
+		await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId));
+	}
+	if (kinds.has("loginChallenges")) await deleteUserLoginChallenges(env, userId);
+	if (kinds.has("apiKeys")) await db.delete(apiKeys).where(eq(apiKeys.userId, userId));
+	if (kinds.has("sessions")) await deleteUserSessions(env, userId, keepSessionToken);
+}
+
+export async function revokePasswordResetTokens(env: CloudflareEnv, userId: string): Promise<void> {
+	await getDb(env).delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId));
 }

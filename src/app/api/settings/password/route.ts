@@ -4,7 +4,8 @@ import { ZodError } from "zod";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
 import { requireUser } from "@/lib/auth/cookies";
-import { deleteUserSessions, getSessionTokenFromRequestHeaders } from "@/lib/auth/session";
+import { getSessionTokenFromRequestHeaders } from "@/lib/auth/session";
+import { revokeCredentialsAfterPasswordChange } from "@/lib/auth/password-reset";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { getEnv } from "@/lib/cloudflare";
 import type { ChangePasswordInput } from "./types";
@@ -37,8 +38,8 @@ export async function PATCH(request: Request) {
 		.update(users)
 		.set({ passwordHash: hashPassword(parsed.newPassword) })
 		.where(eq(users.id, user.id));
-	// Anyone else holding a session for this account is signed out; this one stays.
-	await deleteUserSessions(env, user.id, getSessionTokenFromRequestHeaders(request));
+	// Other sessions, reset links, login challenges, and API keys stop working. This session stays.
+	await revokeCredentialsAfterPasswordChange(env, user.id, getSessionTokenFromRequestHeaders(request));
 
 	return NextResponse.json({ ok: true });
 }

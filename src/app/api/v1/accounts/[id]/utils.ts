@@ -38,13 +38,16 @@ export async function PATCH(request: Request, { params }: AdminAccountRouteParam
 	if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 	const canForwardEmail = (await getLicenseEntitlements(env)).canForwardEmail;
 	if (!canForwardEmail && parsed.data.forwardingEmail && parsed.data.forwardingEmail !== account.forwardingEmail) return NextResponse.json({ error: "A Pro or Team license is required for email forwarding" }, { status: 403 });
+	if (auth.userId !== account.id && parsed.data.forwardingEmail !== undefined && parsed.data.forwardingEmail !== account.forwardingEmail) {
+		return NextResponse.json({ error: "Only the account owner can change forwarding" }, { status: 403 });
+	}
 	await updateAccountCredentials(db, id, { name: parsed.data.name, password: parsed.data.password ?? null });
 	if (parsed.data.password) await deleteUserSessions(env, id);
 	await db.update(users).set({
 		role: parsed.data.role,
 		disabled: parsed.data.disabled,
 		canManageMailboxes: parsed.data.canManageMailboxes,
-		...(parsed.data.forwardingEmail !== undefined ? { forwardingEmail: parsed.data.forwardingEmail } : {}),
+		...(auth.userId === account.id && parsed.data.forwardingEmail !== undefined ? { forwardingEmail: parsed.data.forwardingEmail } : {}),
 	}).where(eq(users.id, id));
 	return NextResponse.json({ ok: true });
 }

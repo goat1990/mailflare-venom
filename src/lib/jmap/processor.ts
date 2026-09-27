@@ -114,7 +114,7 @@ export async function processRequest(ctx: JmapContext, request: JmapRequest): Pr
 				responses.push(["error", error.toMethodError(), callId]);
 			} else {
 				console.error(`JMAP ${name} failed`, error);
-				responses.push(["error", { type: "serverFail", description: error instanceof Error ? error.message : "Unexpected error" }, callId]);
+				responses.push(["error", { type: "serverFail", description: "The method could not be completed" }, callId]);
 			}
 		}
 	}
