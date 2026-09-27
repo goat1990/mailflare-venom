@@ -1,20 +1,13 @@
 // @ts-ignore — generated at build time
 import { default as nextHandler } from "./.open-next/worker.js";
-import {
-	processInboundMessage,
-	storeRawToR2,
-	type InboundQueueMessage,
-} from "./src/lib/email/inbound";
+import { processInboundMessage } from "./src/lib/email/inbound";
 import { processOutboundQueue, type OutboundQueueMessage } from "./src/lib/email/send";
 import { isInboundQueueMessage, isWebhookRetryMessage } from "./worker-utils";
-import { processWebhookRetry, type WebhookRetryMessage } from "./src/lib/email/webhooks";
-import { resolveIncomingMail, forwardMessage } from "./src/lib/email/incoming";
+import { processWebhookRetry, retryStalledWebhookDeliveries, type WebhookRetryMessage } from "./src/lib/email/webhooks";
+import { forwardMessage } from "./src/lib/email/incoming";
+import { intakeIncomingMail } from "./src/lib/email/intake";
 import { getUserFromSession } from "./src/lib/auth/session";
 import { getSessionTokenFromRequest } from "./src/lib/realtime/utils";
-import {
-	getAccountForwardingDestination,
-	MAILFLARE_FORWARDED_HEADER,
-} from "./src/lib/email/account-forwarding";
 import { runScheduledDatabaseBackup } from "./src/lib/backups/runner";
 import { processAgentDraftJob } from "./src/lib/agent/jobs/utils";
 import { runAgentMaintenance } from "./src/lib/agent/maintenance";
@@ -40,42 +33,18 @@ export default {
 		return nextHandler.fetch(request, env, ctx);
 	},
 
-	async email(message: ForwardableEmailMessage, env: CloudflareEnv, ctx: ExecutionContext) {
-		try {
-			// Domain routing rules are resolved here rather than in the queue because reject and
-			// forward can only be actioned on the live ForwardableEmailMessage.
-			const decision = await resolveIncomingMail(env, message.from, message.to);
-
-			if (decision?.action === "reject") {
-				message.setReject(decision.rejectReason ?? "Message rejected by routing rule");
-				return;
-			}
-
-			if (decision?.action === "forward" && decision.forwardTo) {
-				const forwarded = await forwardMessage(message, decision.forwardTo);
-				// A forward rule drops the message unless it was explicitly asked to keep a copy.
-				// If the forward itself failed we still store it, so mail is never silently lost.
-				if (forwarded && !decision.keepCopy) return;
-			}
-
-			if (message.headers.get(MAILFLARE_FORWARDED_HEADER) !== "1") {
-				const forwardingDestination = await getAccountForwardingDestination(env, message.to);
-				if (forwardingDestination) {
-					await forwardMessage(message, forwardingDestination);
-				}
-			}
-			const rawR2Key = await storeRawToR2(env, message.from, message.to, message.raw);
-			const payload: InboundQueueMessage = {
-				from: message.from,
-				to: message.to,
-				rawR2Key,
-				headers: Object.fromEntries(message.headers),
-			};
-			await env.INBOUND_QUEUE.send(payload);
-		} catch (err) {
-			console.error("Inbound enqueue failed", err);
-			message.setReject("Processing failed");
-		}
+	async email(message: ForwardableEmailMessage, env: CloudflareEnv) {
+		// Domain routing rules are resolved here rather than in the queue because reject and
+		// forward can only be actioned on the live ForwardableEmailMessage. A failed store or
+		// enqueue is thrown, not turned into setReject, which is a permanent SMTP failure.
+		await intakeIncomingMail(
+			env,
+			{ from: message.from, to: message.to, raw: await new Response(message.raw).arrayBuffer(), headers: Object.fromEntries(message.headers) },
+			{
+				reject: (reason) => message.setReject(reason),
+				forward: (destination, headers) => forwardMessage(message, destination, headers),
+			},
+		);
 	},
 
 	async queue(batch: MessageBatch, env: CloudflareEnv): Promise<void> {
@@ -103,5 +72,6 @@ export default {
 	async scheduled(controller: ScheduledController, env: CloudflareEnv, ctx: ExecutionContext) {
 		if (controller.cron === "0 2 * * *") ctx.waitUntil(runScheduledDatabaseBackup(env, new Date(controller.scheduledTime)));
 		ctx.waitUntil(runAgentMaintenance(env));
+		ctx.waitUntil(retryStalledWebhookDeliveries(env));
 	},
 } satisfies ExportedHandler<CloudflareEnv>;

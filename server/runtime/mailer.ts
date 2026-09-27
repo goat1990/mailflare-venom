@@ -105,16 +105,18 @@ export class Mailer {
 				const detail = await response.text().catch(() => "");
 				throw new Error(`Cloudflare Email Sending failed (${response.status}): ${detail.slice(0, 300)}`);
 			}
-			return { messageId };
+			const sent = (await response.json().catch(() => null)) as { result?: { message_id?: string } } | null;
+			return { messageId: sent?.result?.message_id || messageId };
 		}
 
 		throw new Error("Outbound mail is not configured. Set SMTP_URL, or CF_ACCOUNT_ID and CF_TOKEN.");
 	}
 
-	/** Relay a raw RFC 5322 message unchanged, for forwarding rules. SMTP only. */
-	async sendRaw(envelopeFrom: string, to: string, raw: Buffer): Promise<boolean> {
+	/** Relay a raw RFC 5322 message for forwarding rules with `headers` prepended, such as the loop guard. SMTP only. */
+	async sendRaw(envelopeFrom: string, to: string, raw: Buffer, headers: Record<string, string> = {}): Promise<boolean> {
 		if (!this.transporter) return false;
-		await this.transporter.sendMail({ envelope: { from: envelopeFrom, to }, raw });
+		const prefix = Object.entries(headers).map(([name, value]) => `${name}: ${value.replace(/[\r\n]+/g, " ")}\r\n`).join("");
+		await this.transporter.sendMail({ envelope: { from: envelopeFrom, to }, raw: Buffer.concat([Buffer.from(prefix), raw]) });
 		return true;
 	}
 }

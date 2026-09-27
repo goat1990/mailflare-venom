@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
  * Inbound mail from the Cloudflare email relay Worker (deploy/cloudflare-email-relay).
  * The body is the raw RFC 5322 message; envelope addresses travel in headers and
  * the request is HMAC-signed with INBOUND_WEBHOOK_SECRET. The response tells the
- * relay whether to reject or forward, since only it can act on the live message.
+ * relay whether to reject and where to forward, since only it can act on the live message.
  */
 export async function POST(request: Request) {
 	const env = getEnv();
@@ -21,7 +21,8 @@ export async function POST(request: Request) {
 	const from = request.headers.get("x-mailflare-from") ?? "";
 	const to = request.headers.get("x-mailflare-to") ?? "";
 	const signature = request.headers.get("x-mailflare-signature") ?? "";
-	if (!from || !to || !(await verifyInboundSignature(secret, signature, raw, from, to))) {
+	const keepCopy = request.headers.get("x-mailflare-keep-copy") === "1";
+	if (!from || !to || !(await verifyInboundSignature(secret, signature, raw, from, to, keepCopy))) {
 		return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
 	}
 
@@ -32,19 +33,21 @@ export async function POST(request: Request) {
 		// The header map is advisory; the raw message is authoritative.
 	}
 
-	let forwardTo: string | null = null;
-	let forwardHeaders: Record<string, string> = {};
+	const forwards: Array<{ to: string; headers: Record<string, string> }> = [];
 	const result = await intakeIncomingMail(
 		env,
 		{ from, to, raw, headers },
 		{
-			// The relay performs the forward on the live message; report it as done so keep-copy applies.
+			// The relay forwards after this responds, so a forward-only rule skips storage here.
+			// When one of those forwards fails the relay asks again with keep-copy, and then no
+			// forward counts as sent, which stores the message.
 			forward: async (destination, extra) => {
-				forwardTo = destination;
-				forwardHeaders = extra;
+				if (keepCopy) return false;
+				forwards.push({ to: destination, headers: extra });
 				return true;
 			},
 		},
 	);
-	return NextResponse.json({ ...result, forwardTo, forwardHeaders });
+	const last = forwards.at(-1);
+	return NextResponse.json({ ...result, forwards, forwardTo: last?.to ?? null, forwardHeaders: last?.headers ?? {} });
 }

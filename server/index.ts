@@ -31,15 +31,20 @@ async function main() {
 	const migrated = await applyMigrations(runtime.database, resolve(process.env.MIGRATIONS_DIR ?? join(process.cwd(), "drizzle", "migrations")));
 	if (migrated.length) console.log(`Applied ${migrated.length} migration(s): ${migrated.join(", ")}`);
 
+	// A body no consumer recognises throws, as in worker.ts, so it is retried and kept as dead
+	// rather than acknowledged.
 	runtime.inboundQueue.setConsumer(async (body) => {
-		if (isInboundQueueMessage(body)) await processInboundMessage(env, body);
+		if (!isInboundQueueMessage(body)) throw new Error("Unknown inbound queue message");
+		await processInboundMessage(env, body);
 	});
 	runtime.outboundQueue.setConsumer(async (body) => {
 		if (isWebhookRetryMessage(body)) await processWebhookRetry(env, body as WebhookRetryMessage);
-		else await processOutboundQueue(env, body as OutboundQueueMessage);
+		else if ((body as { kind?: unknown } | null)?.kind === "email.scheduled") await processOutboundQueue(env, body as OutboundQueueMessage);
+		else throw new Error("Unknown outbound queue message");
 	});
 	runtime.agentQueue.setConsumer(async (body) => {
-		if (typeof body === "object" && body !== null && (body as { kind?: unknown }).kind === "agent.draft" && typeof (body as { jobId?: unknown }).jobId === "string") await processAgentDraftJob(env, (body as { jobId: string }).jobId);
+		if (typeof body !== "object" || body === null || (body as { kind?: unknown }).kind !== "agent.draft" || typeof (body as { jobId?: unknown }).jobId !== "string") throw new Error("Unknown agent queue message");
+		await processAgentDraftJob(env, (body as { jobId: string }).jobId);
 	});
 
 	const app = next({ dev, dir: process.cwd(), hostname: host, port });

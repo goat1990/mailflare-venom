@@ -96,9 +96,11 @@ export async function enableEmailRouting(
 	);
 }
 
-export async function disableEmailRouting(env: CloudflareEnv, zoneId: string) {
+/** Disables Email Routing for the zone, or with `hostname` for that subdomain only. */
+export async function disableEmailRouting(env: CloudflareEnv, zoneId: string, hostname?: string) {
 	return cfRequest<unknown>(env, `/zones/${zoneId}/email/routing/dns`, {
 		method: "DELETE",
+		...(hostname ? { body: JSON.stringify({ name: hostname }) } : {}),
 	});
 }
 
@@ -160,11 +162,19 @@ export async function getEmailRoutingSettings(
 	);
 }
 
+const EMAIL_ROUTING_RULES_PAGE_SIZE = 50;
+
+/** Every rule in the zone; the API pages, and a rule missed on a later page would be created twice or never deleted. */
 export async function listEmailRoutingRules(env: CloudflareEnv, zoneId: string) {
-	return cfRequest<CfEmailRoutingRule[]>(
-		env,
-		`/zones/${zoneId}/email/routing/rules`,
-	);
+	const rules: CfEmailRoutingRule[] = [];
+	for (let page = 1; ; page += 1) {
+		const batch = await cfRequest<CfEmailRoutingRule[]>(
+			env,
+			`/zones/${zoneId}/email/routing/rules?page=${page}&per_page=${EMAIL_ROUTING_RULES_PAGE_SIZE}`,
+		);
+		rules.push(...batch);
+		if (batch.length < EMAIL_ROUTING_RULES_PAGE_SIZE) return rules;
+	}
 }
 
 export async function deleteEmailRoutingRule(
@@ -184,7 +194,7 @@ export async function createEmailRoutingRuleToWorker(
 	zoneId: string,
 	address: string,
 ) {
-	const workerName = getEmailWorkerName();
+	const workerName = getEmailWorkerName(env);
 	return cfRequest<CfEmailRoutingRule>(
 		env,
 		`/zones/${zoneId}/email/routing/rules`,
@@ -221,7 +231,7 @@ export async function ensureEmailRoutingRuleToWorker(
 ) {
 	if (zoneId === "manual") return;
 	const normalized = address.toLowerCase();
-	const workerName = getEmailWorkerName();
+	const workerName = getEmailWorkerName(env);
 	const rules = await listEmailRoutingRules(env, zoneId);
 	const existing = rules.find((rule) => isWorkerRouteForAddress(rule, normalized, workerName));
 
@@ -253,7 +263,7 @@ export async function deleteEmailRoutingRuleForAddress(
 ): Promise<boolean> {
 	if (zoneId === "manual") return false;
 	const normalized = address.toLowerCase();
-	const workerName = getEmailWorkerName();
+	const workerName = getEmailWorkerName(env);
 	const rules = await listEmailRoutingRules(env, zoneId);
 	const existing = rules.find((rule) => isWorkerRouteForAddress(rule, normalized, workerName));
 	if (!existing?.id) return false;

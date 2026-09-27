@@ -1,9 +1,10 @@
+import { lookup } from "node:dns/promises";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { openFileBucket } from "./file-bucket";
 import { openMailer, type Mailer, type MailerConfig } from "./mailer";
 import { openAssets, openRateLimiter } from "./misc";
-import { openQueue, type InProcessQueue } from "./queue";
+import { openQueue, QueueJournal, type InProcessQueue } from "./queue";
 import { RealtimeHubRegistry } from "./realtime";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite-database";
 import type { NodeRuntime } from "./types";
@@ -34,9 +35,10 @@ export function createNodeRuntime(): NodeRuntime {
 	const database = openSqliteDatabase(join(dataDir, "mailflare.sqlite"));
 	const bucket = openFileBucket(join(dataDir, "blobs"));
 	const mailer = openMailer(mailerConfig());
-	const inboundQueue = openQueue("mailflare-inbound");
-	const outboundQueue = openQueue("mailflare-outbound");
-	const agentQueue = openQueue("mailflare-agent");
+	const queueJournal = new QueueJournal(join(dataDir, "queue.sqlite"));
+	const inboundQueue = openQueue("mailflare-inbound", queueJournal);
+	const outboundQueue = openQueue("mailflare-outbound", queueJournal);
+	const agentQueue = openQueue("mailflare-agent", queueJournal);
 	const realtime = new RealtimeHubRegistry();
 	const publicDir = resolve(optional("PUBLIC_DIR") ?? "./public");
 
@@ -59,6 +61,7 @@ export function createNodeRuntime(): NodeRuntime {
 		CF_TOKEN: optional("CF_TOKEN"),
 		CF_API_KEY: optional("CF_API_KEY"),
 		CF_EMAIL: optional("CF_EMAIL"),
+		CF_EMAIL_WORKER_NAME: optional("CF_EMAIL_WORKER_NAME"),
 		TURNSTILE_SECRET_KEY: optional("TURNSTILE_SECRET_KEY"),
 		GITHUB_UPDATE_TOKEN: optional("GITHUB_UPDATE_TOKEN"),
 		GITHUB_UPDATE_REF: optional("GITHUB_UPDATE_REF"),
@@ -67,6 +70,7 @@ export function createNodeRuntime(): NodeRuntime {
 		MAILFLARE_RUNTIME: "node",
 		APP_URL: optional("APP_URL")?.replace(/\/$/, ""),
 		INBOUND_WEBHOOK_SECRET: optional("INBOUND_WEBHOOK_SECRET"),
+		HOST_RESOLVER: async (hostname: string) => (await lookup(hostname, { all: true })).map((entry) => entry.address),
 	} as unknown as CloudflareEnv;
 
 	return {

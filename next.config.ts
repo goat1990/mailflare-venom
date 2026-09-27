@@ -31,4 +31,9 @@ export default nextConfig;
 // runtime provides its own env, so it skips this.
 // See https://opennext.js.org/cloudflare/bindings#local-access-to-bindings.
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
-if (process.env.MAILFLARE_RUNTIME !== "node") initOpenNextCloudflareForDev({ configPath: createDevWranglerConfig() });
+if (process.env.MAILFLARE_RUNTIME !== "node") {
+	initOpenNextCloudflareForDev({ configPath: createDevWranglerConfig() });
+	if (process.env.NODE_ENV === "development") {
+		console.warn("next dev provides bindings only: worker.ts's email, queue and cron handlers and the realtime Durable Object do not run. Use `npm run preview` for the Worker, or `npm run dev:node` for the self-hosted process.");
+	}
+}

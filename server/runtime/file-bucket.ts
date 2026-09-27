@@ -1,12 +1,12 @@
 import { createReadStream } from "node:fs";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve, sep } from "node:path";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 
 /**
  * The R2 bucket API over a directory. Objects are files under `root`; the
  * HTTP and custom metadata R2 would keep ride in a `.meta.json` sidecar.
- * Covers what the app uses: get (with a byte range), put, delete, head.
+ * Covers what the app uses: get (with a byte range), put, delete, head, list.
  */
 type StoredMeta = {
 	httpMetadata?: { contentType?: string; contentDisposition?: string; cacheControl?: string };
@@ -158,8 +158,39 @@ export class FileBucket {
 		}
 	}
 
-	async list() {
-		throw new Error("FileBucket.list is not implemented");
+	/** R2's list: keys in order after `cursor`, with `delimiter` folding deeper keys into prefixes. */
+	async list(options?: { prefix?: string; limit?: number; cursor?: string; delimiter?: string }) {
+		const prefix = options?.prefix ?? "";
+		const limit = Math.min(Math.max(options?.limit ?? 1000, 1), 1000);
+		const keys = (await this.keys()).filter((key) => key.startsWith(prefix)).sort();
+		const entries: Array<{ key: string; folded: boolean }> = [];
+		for (const key of keys) {
+			const folded = options?.delimiter ? key.indexOf(options.delimiter, prefix.length) : -1;
+			const entry = folded >= 0 ? { key: key.slice(0, folded + options!.delimiter!.length), folded: true } : { key, folded: false };
+			if (entries.at(-1)?.key !== entry.key) entries.push(entry);
+		}
+		const page = entries.filter((entry) => !options?.cursor || entry.key > options.cursor).slice(0, limit + 1);
+		const truncated = page.length > limit;
+		const shown = page.slice(0, limit);
+		const objects: FileObject[] = [];
+		for (const entry of shown) {
+			if (entry.folded) continue;
+			const meta = await this.readMeta(entry.key);
+			if (meta) objects.push(new FileObject(entry.key, this.pathFor(entry.key), meta));
+		}
+		return {
+			objects,
+			delimitedPrefixes: shown.filter((entry) => entry.folded).map((entry) => entry.key),
+			truncated,
+			...(truncated ? { cursor: shown.at(-1)!.key } : {}),
+		};
+	}
+
+	private async keys(): Promise<string[]> {
+		const found = await readdir(this.root, { recursive: true, withFileTypes: true }).catch(() => []);
+		return found
+			.filter((entry) => entry.isFile() && !entry.name.endsWith(".meta.json"))
+			.map((entry) => relative(this.root, join(entry.parentPath, entry.name)).split(sep).join("/"));
 	}
 }
 

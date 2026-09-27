@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { messages, users } from "@/db/schema";
 import { newId } from "@/lib/ids";
 import { buildSnippet, parseRawMime } from "@/lib/email/parse";
-import { resolveInboundAddress, resolveInboxRuleDestination } from "@/lib/email/routing";
+import { resolveAcceptedMailbox, resolveInboxRuleDestination } from "@/lib/email/routing";
 import { dispatchWebhooks } from "@/lib/email/webhooks";
 import { getMessageContactNames, upsertContactFromAddress } from "@/lib/contacts/service";
 import { getEmailAddress } from "@/lib/email/address";
@@ -11,7 +11,7 @@ import { sendMailboxAutoReply } from "@/lib/email/auto-reply";
 import { getMailboxAccessLevel } from "@/lib/mailboxes/access";
 import { listMessageAttachments, storeMessageAttachments } from "@/lib/email/attachments";
 import { getUnsubscribeUrlFromRawR2Key } from "@/lib/email/unsubscribe";
-import { resolveThreadId } from "@/lib/email/threading";
+import { normalizeMessageId, resolveThreadId } from "@/lib/email/threading";
 import type { SessionUser } from "@/lib/auth/types";
 import { analyzeSpam } from "@/lib/spam/engine";
 import { getReputationKeys } from "@/lib/spam/analyzers/reputation";
@@ -35,56 +35,41 @@ export async function processInboundMessage(
 ): Promise<void> {
 	const db = getDb(env);
 	// The sender is passed so that sender-based block rules resolve the same way here as they
-	// do in the Worker email handler.
-	const decision = await resolveInboundAddress(db, payload.to, payload.from);
+	// do at the edge.
+	const accepted = await resolveAcceptedMailbox(db, payload.to, payload.from);
+	// Throwing keeps the message on the queue; returning would acknowledge mail nobody stored.
+	if (!accepted) throw new Error(`No mailbox can keep inbound mail for ${payload.to}`);
+	const { mailbox, blocked } = accepted;
 
-	if (!decision) {
-		console.warn(`No routing for inbound address: ${payload.to}`);
-		return;
-	}
-
-	if (decision.action === "reject") {
-		console.warn(`Rejected inbound: ${payload.to}`);
-		return;
-	}
-
-	// A forward decision only reaches the queue when the rule keeps a copy; without a
-	// destination mailbox there is nothing to store.
-	if (decision.action === "forward" && !decision.keepCopy) {
-		console.info(`Forward ${payload.to} -> ${decision.forwardTo}`);
-		return;
-	}
-
-	if (!decision.mailbox) return;
 	const [stored] = await db.select({ id: messages.id }).from(messages).where(and(
-		eq(messages.mailboxId, decision.mailbox.mailboxId),
+		eq(messages.mailboxId, mailbox.mailboxId),
 		eq(messages.rawR2Key, payload.rawR2Key),
 	)).limit(1);
 	if (stored) {
 		try {
 			const [existing] = await db.select().from(messages).where(eq(messages.id, stored.id)).limit(1);
-			if (existing && Date.now() - existing.createdAt.getTime() < 30 * 60_000) await scheduleAutoDraft(env, { mailboxId: decision.mailbox.mailboxId, sourceMessageId: existing.id, ownerUserId: decision.mailbox.userId, sender: existing.fromAddr, headers: payload.headers, status: existing.status, folderId: existing.folderId, spamVerdict: existing.spamVerdict, spamAnalysisError: existing.spamAnalysisError });
+			if (existing && Date.now() - existing.createdAt.getTime() < 30 * 60_000) await scheduleAutoDraft(env, { mailboxId: mailbox.mailboxId, sourceMessageId: existing.id, ownerUserId: mailbox.userId, sender: existing.fromAddr, headers: payload.headers, status: existing.status, folderId: existing.folderId, spamVerdict: existing.spamVerdict, spamAnalysisError: existing.spamAnalysisError });
 		} catch (error) { console.error("Auto-draft recovery failed", error); }
 		return;
 	}
 
 	const raw = await env.BUCKET.get(payload.rawR2Key);
-	if (!raw) {
-		console.error(`Missing R2 object: ${payload.rawR2Key}`);
-		return;
-	}
+	if (!raw) throw new Error(`Missing R2 object: ${payload.rawR2Key}`);
 
 	const buffer = await raw.arrayBuffer();
 	const parsed = await parseRawMime(buffer);
+	const inboundDedupeKey = getInboundDedupeKey(mailbox.mailboxId, parsed.messageId, payload.rawR2Key);
+	const [duplicate] = await db.select({ id: messages.id }).from(messages).where(eq(messages.inboundDedupeKey, inboundDedupeKey)).limit(1);
+	if (duplicate) return;
 	const messageId = newId("msg");
 	const snippet = buildSnippet(parsed.text, parsed.html);
-	const deliveredAddress = getEmailAddress(payload.to) || `${decision.mailbox.localPart}@${decision.mailbox.hostname}`;
+	const deliveredAddress = getEmailAddress(payload.to) || `${mailbox.localPart}@${mailbox.hostname}`;
 	// Keep the whole To header so reply-all can address everyone; rules and
 	// webhooks still see the envelope recipient the message was delivered to.
 	const toAddr = parsed.toAddr ?? payload.to;
 	const fromAddr = parsed.fromAddr ?? payload.from;
 	const destination = await resolveInboxRuleDestination(db, {
-		mailboxId: decision.mailbox.mailboxId,
+		mailboxId: mailbox.mailboxId,
 		toAddress: payload.to,
 		fromAddress: fromAddr,
 		subject: parsed.subject,
@@ -92,12 +77,12 @@ export async function processInboundMessage(
 	});
 	let spamAnalysis: Awaited<ReturnType<typeof analyzeSpam>> | null = null;
 	let spamAnalysisError: string | null = null;
-	const [owner] = await db.select({ enabled: users.spamProtectionEnabled }).from(users).where(eq(users.id, decision.mailbox.userId)).limit(1);
+	const [owner] = await db.select({ enabled: users.spamProtectionEnabled }).from(users).where(eq(users.id, mailbox.userId)).limit(1);
 	if (owner?.enabled !== false) {
 		try {
 			spamAnalysis = await analyzeSpam(db, {
-				mailboxId: decision.mailbox.mailboxId,
-				userId: decision.mailbox.userId,
+				mailboxId: mailbox.mailboxId,
+				userId: mailbox.userId,
 				envelopeFrom: payload.from,
 				headers: payload.headers,
 				message: parsed,
@@ -115,27 +100,27 @@ export async function processInboundMessage(
 			fingerprint: spamAnalysis?.fingerprint ?? "",
 		};
 	}
-	const status = destination.status === "received" && spamAnalysis?.verdict === "spam"
+	const status = blocked || (destination.status === "received" && spamAnalysis?.verdict === "spam")
 		? "spam"
 		: destination.status;
 	const folderId = status === "spam" ? null : destination.folderId;
 	const contact = await upsertContactFromAddress(env, {
-		userId: decision.mailbox.userId,
+		userId: mailbox.userId,
 		address: fromAddr,
 		source: "inbound",
 	});
 	const threadId = await resolveThreadId(db, {
-		mailboxId: decision.mailbox.mailboxId,
+		mailboxId: mailbox.mailboxId,
 		messageId: parsed.messageId,
 		inReplyTo: parsed.inReplyTo,
 		references: parsed.references,
 	});
 
 	try {
-		await db.insert(messages).values({
+		const [inserted] = await db.insert(messages).values({
 			id: messageId,
-			userId: decision.mailbox.userId,
-			mailboxId: decision.mailbox.mailboxId,
+			userId: mailbox.userId,
+			mailboxId: mailbox.mailboxId,
 			folderId,
 			direction: "inbound",
 			providerMessageId: parsed.messageId,
@@ -156,12 +141,14 @@ export async function processInboundMessage(
 			spamSignals: spamAnalysis ? JSON.stringify(spamAnalysis.signals) : null,
 			spamAnalyzedAt: spamAnalysis ? new Date() : null,
 			spamAnalysisError,
-		});
+			inboundDedupeKey,
+		}).onConflictDoNothing().returning({ id: messages.id });
+		if (!inserted) return;
 
 		await storeMessageAttachments(env, messageId, parsed.attachments, { validate: false });
 		if (spamAnalysis) {
 			try {
-				await recordReputationObservation(env, decision.mailbox.mailboxId, getReputationKeys(parsed, spamAnalysis.fingerprint));
+				await recordReputationObservation(env, mailbox.mailboxId, getReputationKeys(parsed, spamAnalysis.fingerprint));
 			} catch (error) {
 				console.error(`Spam reputation observation failed for ${messageId}`, error);
 			}
@@ -180,34 +167,34 @@ export async function processInboundMessage(
 	if (status === "received") {
 		try {
 			await sendMailboxAutoReply(env, {
-				mailboxId: decision.mailbox.mailboxId,
-				userId: decision.mailbox.userId,
+				mailboxId: mailbox.mailboxId,
+				userId: mailbox.userId,
 				deliveredAddress,
 				fromAddress: fromAddr,
 				incomingMessageId: parsed.messageId,
 				headers: payload.headers,
 			});
 		} catch (error) {
-			console.error(`Auto-reply failed for mailbox ${decision.mailbox.mailboxId}`, error);
+			console.error(`Auto-reply failed for mailbox ${mailbox.mailboxId}`, error);
 		}
 	}
 
 	if (status !== "spam") {
 		const notificationUserIds = await getMailboxNotificationUserIds(
 			env,
-			decision.mailbox.mailboxId,
-			decision.mailbox.userId,
+			mailbox.mailboxId,
+			mailbox.userId,
 		);
 		await notifyUsersOfNewMessage(env, notificationUserIds, {
 			type: "new_message",
 			messageId,
-			mailboxId: decision.mailbox.mailboxId,
+			mailboxId: mailbox.mailboxId,
 			from: fromAddr,
 			fromName: contact?.displayName ?? null,
 			subject: parsed.subject,
 		});
 	}
-	await dispatchWebhooks(env, decision.mailbox.userId, "message.inbound", {
+	await dispatchWebhooks(env, mailbox.userId, "message.inbound", {
 		messageId,
 		from: fromAddr,
 		to: payload.to,
@@ -218,23 +205,14 @@ export async function processInboundMessage(
 		spamVerdict: spamAnalysis?.verdict,
 	});
 	try {
-		await scheduleAutoDraft(env, { mailboxId: decision.mailbox.mailboxId, sourceMessageId: messageId, ownerUserId: decision.mailbox.userId, sender: fromAddr, headers: payload.headers, status, folderId, spamVerdict: spamAnalysis?.verdict, spamAnalysisError });
+		await scheduleAutoDraft(env, { mailboxId: mailbox.mailboxId, sourceMessageId: messageId, ownerUserId: mailbox.userId, sender: fromAddr, headers: payload.headers, status, folderId, spamVerdict: spamAnalysis?.verdict, spamAnalysisError });
 	} catch (error) { console.error("Auto-draft scheduling failed", error); }
 }
 
-export async function storeRawToR2(
-	env: CloudflareEnv,
-	from: string,
-	to: string,
-	raw: ReadableStream<Uint8Array>,
-): Promise<string> {
-	const key = `inbound/${Date.now()}-${newId()}.eml`;
-	const buffer = await new Response(raw).arrayBuffer();
-	await env.BUCKET.put(key, buffer, {
-		httpMetadata: { contentType: "message/rfc822" },
-		customMetadata: { from, to },
-	});
-	return key;
+/** One stored copy per mailbox and Message-ID; mail without a Message-ID is keyed by its raw object. */
+function getInboundDedupeKey(mailboxId: string, messageId: string | null | undefined, rawR2Key: string): string {
+	const id = normalizeMessageId(messageId);
+	return id ? `${mailboxId}:id:${id}` : `${mailboxId}:raw:${rawR2Key}`;
 }
 
 export async function getMessageWithBody(env: CloudflareEnv, userId: string, messageId: string) {

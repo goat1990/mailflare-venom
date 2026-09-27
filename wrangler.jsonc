@@ -1,5 +1,7 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
+	// Email Routing rules target CF_EMAIL_WORKER_NAME, which defaults to this name. Renaming the
+	// Worker means setting that variable and services[].service below to the new name as well.
 	"name": "mailflare",
 	"main": "./worker.ts",
 	"compatibility_date": "2026-05-20",

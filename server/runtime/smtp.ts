@@ -1,14 +1,16 @@
 import { readFileSync } from "node:fs";
 import { SMTPServer } from "smtp-server";
 import type { SMTPServerSession } from "smtp-server";
+import { resolveRecipientRejection } from "@/lib/email/incoming";
 import { intakeIncomingMail } from "@/lib/email/intake";
 import type { Mailer } from "./mailer";
 
 /**
  * Receive mail directly on port 25 (or wherever SMTP_INBOUND_PORT points).
  * One inbound connection per message; each envelope recipient is handed to
- * the same intake the Cloudflare handler uses. Rejected mail gets a 550
- * during DATA, so the sender sees the routing rule's reason.
+ * the same intake the Cloudflare handler uses. A recipient a routing rule
+ * blocks is refused at RCPT TO with the rule's reason, so the rest still
+ * arrive; a failure answers 451 and the sender's retry is deduplicated.
  */
 export function startSmtpListener(
 	env: CloudflareEnv,
@@ -24,6 +26,12 @@ export function startSmtpListener(
 		...(options.tls ? { key: readFileSync(options.tls.keyPath), cert: readFileSync(options.tls.certPath) } : {}),
 		size: options.maxSize,
 		banner: "Mailflare",
+		onRcptTo(address, session: SMTPServerSession, callback) {
+			const from = session.envelope.mailFrom ? session.envelope.mailFrom.address : "";
+			void resolveRecipientRejection(env, from, address.address).then((reason) => {
+				callback(reason ? Object.assign(new Error(reason), { responseCode: 550 }) : undefined);
+			});
+		},
 		onData(stream, session: SMTPServerSession, callback) {
 			const chunks: Buffer[] = [];
 			stream.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -36,16 +44,18 @@ export function startSmtpListener(
 				const raw = Buffer.concat(chunks);
 				const from = session.envelope.mailFrom ? session.envelope.mailFrom.address : "";
 				const headers = parseHeaders(raw);
+				let accepted = 0;
 				let rejectReason: string | null = null;
 				for (const recipient of session.envelope.rcptTo) {
 					const result = await intakeIncomingMail(
 						env,
 						{ from, to: recipient.address, raw: toArrayBuffer(raw), headers },
 						{
-							reject: (reason) => {
-								rejectReason = reason;
-							},
-							forward: async (destination) => mailer.sendRaw(from, destination, raw),
+							forward: (destination, forwardHeaders) =>
+								mailer.sendRaw(from, destination, raw, forwardHeaders).catch((error) => {
+									console.error(`SMTP forward to ${destination} failed`, error);
+									return false;
+								}),
 						},
 					).catch((error) => {
 						console.error(`SMTP intake failed for ${recipient.address}`, error);
@@ -55,8 +65,10 @@ export function startSmtpListener(
 						callback(Object.assign(new Error("Temporary failure, try again later"), { responseCode: 451 }));
 						return;
 					}
+					if (result.action === "reject") rejectReason = result.reason;
+					else accepted += 1;
 				}
-				if (rejectReason) {
+				if (accepted === 0 && rejectReason) {
 					callback(Object.assign(new Error(rejectReason), { responseCode: 550 }));
 					return;
 				}
