@@ -7,6 +7,7 @@ import type { UseMessageThreadResult } from "./conversation-thread-types";
 export function useMessageThread(messageId: string, threadId: string | null | undefined): UseMessageThreadResult {
 	const [messages, setMessages] = useState<ThreadMessage[]>([]);
 	const [loading, setLoading] = useState(false);
+	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (!threadId) return;
@@ -16,9 +17,15 @@ export function useMessageThread(messageId: string, threadId: string | null | un
 			try {
 				const response = await authFetch(`/api/messages/${messageId}/thread`);
 				const data = (await response.json()) as ThreadResponse;
-				if (!cancelled) setMessages(response.ok ? data.messages ?? [] : []);
+				if (cancelled) return;
+				if (!response.ok) {
+					setError(data.error ?? "Could not load conversation");
+					return;
+				}
+				setError(null);
+				setMessages(data.messages ?? []);
 			} catch {
-				if (!cancelled) setMessages([]);
+				if (!cancelled) setError("Could not load conversation");
 			} finally {
 				if (!cancelled) setLoading(false);
 			}
@@ -31,5 +38,5 @@ export function useMessageThread(messageId: string, threadId: string | null | un
 		};
 	}, [messageId, threadId]);
 
-	return { messages: threadId ? messages : [], loading };
+	return { messages: threadId ? messages : [], loading, error: threadId ? error : null };
 }

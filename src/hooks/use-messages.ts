@@ -17,6 +17,7 @@ export function useMessages(
 ) {
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
+	const [error, setError] = useState<string | null>(null);
 	const [total, setTotal] = useState(0);
 	const [limit, setLimit] = useState(filters?.limit ?? 25);
 	const [offset, setOffset] = useState(filters?.offset ?? 0);
@@ -27,15 +28,23 @@ export function useMessages(
 		if (!enabled) return;
 		let cancelled = false;
 		async function loadMessages(force = false, showLoading = false) {
-			if (showLoading) setIsLoading(true);
+			if (showLoading) {
+				setIsLoading(true);
+				setError(null);
+			}
 			try {
 				const params = getMessageQueryParams(folder, mailboxId, filters, folderId);
 				const data = await fetchMessageList(params, force);
 				if (!cancelled) {
+					setError(null);
 					setMessages(data.messages ?? []);
 					setTotal(data.total ?? 0);
 					setLimit(data.limit ?? filters?.limit ?? 25);
 					setOffset(data.offset ?? filters?.offset ?? 0);
+				}
+			} catch (cause) {
+				if (!cancelled) {
+					setError(cause instanceof Error && cause.message ? cause.message : "Could not load messages");
 				}
 			} finally {
 				if (!cancelled) setIsLoading(false);
@@ -58,5 +67,5 @@ export function useMessages(
 		};
 	}, [enabled, filters?.group, filters?.limit, filters?.offset, filters?.query, filters?.read, filters?.title, folder, folderId, mailboxId]);
 
-	return { messages, unreadCount, isLoading, total, limit, offset, updateMessages: setMessages };
+	return { messages, unreadCount, isLoading, error, total, limit, offset, updateMessages: setMessages };
 }

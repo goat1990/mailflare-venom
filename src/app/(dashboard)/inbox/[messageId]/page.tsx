@@ -23,7 +23,6 @@ import { useMessageThread } from "@/components/messages/use-message-thread";
 import { useLatestMessagesFirst } from "@/components/messages/use-latest-messages-first";
 import { useMessageListVisibility } from "@/components/messages/message-list-visibility";
 import { Tooltip } from "@/components/ui/tooltip";
-import { getMessageBackHref } from "@/components/message-actions/utils";
 import { getEmailAddress, getEmailDisplayName, splitEmailAddressList } from "@/lib/email/address";
 import type { MessageAttachment, MessageDetailResponse } from "./types";
 import {
@@ -76,10 +75,17 @@ export default function MessageDetailPage() {
         return;
       }
       setLoading(true);
-      const nextData = await fetchMessageDetail(messageId);
-      if (!cancelled) {
-        setData(nextData);
-        setLoading(false);
+      try {
+        const nextData = await fetchMessageDetail(messageId);
+        if (!cancelled) {
+          setData(nextData);
+          setLoading(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setData({ error: "Could not load message" });
+          setLoading(false);
+        }
       }
     }
 
@@ -148,6 +154,13 @@ export default function MessageDetailPage() {
 
     <div className="flex py-2 h-14 items-center justify-between px-2 border-b border-neutral-200 sticky top-0 bg-white z-40 gap-4">
       <Tooltip label={assistantVisible ? null : messageListVisible ? "Hide email list" : "Show email list"} className="hidden lg:inline-flex"><button type="button" className={clsx(assistantVisible ? "opacity-40" : messageListVisible ? "" : "opacity-60 hover:opacity-100", !assistantVisible && "hover:bg-neutral-100 hover:text-neutral-900", "relative z-10 shrink-0 rounded-full p-2 text-neutral-600 duration-200")} onClick={toggleMessageList} disabled={assistantVisible} aria-label={messageListVisible ? "Hide email list" : "Show email list"} aria-pressed={messageListVisible}><Columns2 size={18} /></button></Tooltip>
+      <Link
+        href={pathname.replace(/\/[^/]+$/, "") || "/inbox"}
+        className="rounded-full p-2 text-neutral-600 hover:bg-neutral-100 lg:hidden"
+        aria-label="Back to messages"
+      >
+        <ArrowLeft className="h-5 w-5" />
+      </Link>
       <div className="min-w-0 flex-1" />
       {/* <div className="flex items-center flex-row gap-6">
 					<Link
@@ -191,6 +204,9 @@ export default function MessageDetailPage() {
           />
         </div>
       </div>
+      {thread.error && (
+        <p role="alert" className="px-6 pt-4 text-sm text-red-600">{thread.error}</p>
+      )}
       <ConversationThread
         currentMessageId={message.id}
         position={latestMessagesFirst ? "after" : "before"}

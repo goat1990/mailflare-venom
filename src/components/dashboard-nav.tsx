@@ -75,6 +75,7 @@ export function DashboardNav({ className }: { className?: string }) {
     useState<FolderColor>(DEFAULT_FOLDER_COLOR);
   const [addingFolder, setAddingFolder] = useState(false);
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [folderError, setFolderError] = useState<string | null>(null);
   const linksWithCounts: NavLink[] = links.map((link): NavLink => {
     if (link.href === "/inbox") {
       return { ...link, count: getFolderNavCount("inbox", counts.folders) };
@@ -127,14 +128,19 @@ export function DashboardNav({ className }: { className?: string }) {
     let cancelled = false;
     const params = new URLSearchParams({ mailboxId: selectedMailbox.id });
     authFetch(`/api/folders?${params.toString()}`)
-      .then(
-        (response) => response.json() as Promise<{ folders?: CustomFolder[] }>,
-      )
+      .then(async (response) => {
+        const data = (await response.json()) as { folders?: CustomFolder[]; error?: string };
+        if (!response.ok) throw new Error(data.error ?? "Could not load folders");
+        return data;
+      })
       .then((data) => {
-        if (!cancelled) setFolders(data.folders ?? []);
+        if (!cancelled) {
+          setFolderError(null);
+          setFolders(data.folders ?? []);
+        }
       })
       .catch(() => {
-        if (!cancelled) setFolders([]);
+        if (!cancelled) setFolderError("Could not load folders");
       });
 
     return () => {
@@ -252,7 +258,12 @@ export function DashboardNav({ className }: { className?: string }) {
           )}
         </div>
       )}
-      {!minimal && folders.length === 0 && (
+      {!minimal && folderError && (
+        <p role="alert" className="mx-3 rounded-lg border border-red-100 bg-red-50 px-3 py-3 text-xs text-red-700">
+          {folderError}
+        </p>
+      )}
+      {!minimal && !folderError && folders.length === 0 && (
         <div className="mx-3 rounded-lg border border-dashed border-neutral-200 px-3 py-3 text-xs text-neutral-400">
           No folders yet
         </div>

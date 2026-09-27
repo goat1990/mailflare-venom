@@ -13,6 +13,7 @@ import {
 	parseNewMessageEvent,
 	REALTIME_FALLBACK_INTERVAL_MS,
 	REALTIME_HEARTBEAT_INTERVAL_MS,
+	realtimeFallbackOn,
 	showBrowserNewMessageNotification,
 } from "./message-realtime-utils";
 
@@ -32,38 +33,47 @@ export function useMessagePolling(): MessageRealtimeState {
 			window.dispatchEvent(new Event("mailflare:messages-changed"));
 		}
 
-		function clearConnectionTimers() {
+		function clearReconnectTimers() {
 			if (reconnectTimer) window.clearTimeout(reconnectTimer);
 			if (heartbeatTimer) window.clearInterval(heartbeatTimer);
-			if (fallbackTimer) window.clearInterval(fallbackTimer);
 			reconnectTimer = null;
 			heartbeatTimer = null;
+		}
+
+		function stopFallback() {
+			if (!fallbackTimer) return;
+			window.clearInterval(fallbackTimer);
 			fallbackTimer = null;
 		}
 
-		function startFallbackRefresh() {
-			if (fallbackTimer) return;
-			fallbackTimer = window.setInterval(
-				dispatchMessagesChanged,
-				REALTIME_FALLBACK_INTERVAL_MS,
-			);
+		function syncFallback(event: "start" | "reconnect" | "open" | "close") {
+			if (!realtimeFallbackOn(event)) {
+				stopFallback();
+				return;
+			}
+			if (fallbackTimer || stopped) return;
+			fallbackTimer = window.setInterval(dispatchMessagesChanged, REALTIME_FALLBACK_INTERVAL_MS);
 		}
 
 		function scheduleReconnect() {
-			if (stopped || !getClientSessionToken()) return;
-			startFallbackRefresh();
+			if (stopped) return;
+			syncFallback("close");
+			if (!getClientSessionToken()) return;
 			const delay = getReconnectDelay(reconnectAttempt);
 			reconnectAttempt += 1;
 			reconnectTimer = window.setTimeout(connect, delay);
 		}
 
 		function connect() {
-			clearConnectionTimers();
-			if (stopped || !getClientSessionToken()) return;
+			clearReconnectTimers();
+			if (stopped) return;
+			syncFallback("reconnect");
+			if (!getClientSessionToken()) return;
 
 			socket = new WebSocket(getRealtimeWebSocketUrl());
 			socket.onopen = () => {
 				reconnectAttempt = 0;
+				syncFallback("open");
 				heartbeatTimer = window.setInterval(() => {
 					if (socket?.readyState === WebSocket.OPEN) socket.send("ping");
 				}, REALTIME_HEARTBEAT_INTERVAL_MS);
@@ -94,19 +104,22 @@ export function useMessagePolling(): MessageRealtimeState {
 				socket.close(1000, "Session changed");
 				socket = null;
 			}
-			clearConnectionTimers();
+			clearReconnectTimers();
+			stopFallback();
 			reconnectAttempt = 0;
 			setNotification(null);
-			if (getClientSessionToken()) connect();
+			connect();
 		}
 
 		window.addEventListener(AUTH_SESSION_CHANGED_EVENT, restartForSessionChange);
+		syncFallback("start");
 		connect();
 
 		return () => {
 			stopped = true;
 			window.removeEventListener(AUTH_SESSION_CHANGED_EVENT, restartForSessionChange);
-			clearConnectionTimers();
+			clearReconnectTimers();
+			stopFallback();
 			if (socket) {
 				socket.onclose = null;
 				socket.close(1000, "Client closed");

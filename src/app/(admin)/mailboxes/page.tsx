@@ -71,7 +71,9 @@ export default function MailboxesPage() {
 		queryKey: ["mailboxes"],
 		queryFn: async () => {
 			const res = await authFetch("/api/mailboxes");
-			return (await res.json()) as MailboxesResponse;
+			const json = (await res.json()) as MailboxesResponse & { error?: string };
+			if (!res.ok) throw new Error(json.error ?? "Could not load mailboxes");
+			return json;
 		},
 	});
 
@@ -231,7 +233,12 @@ export default function MailboxesPage() {
 				{mailboxes.isLoading && (
 					<SectionRowSkeleton />
 				)}
-				{!mailboxes.isLoading && (mailboxes.data?.mailboxes ?? []).length === 0 && (
+				{mailboxes.isError && (
+					<p role="alert" className="rounded-2xl bg-white px-5 py-4 text-sm text-red-600">
+						{mailboxes.error instanceof Error ? mailboxes.error.message : "Could not load mailboxes"}
+					</p>
+				)}
+				{!mailboxes.isLoading && !mailboxes.isError && (mailboxes.data?.mailboxes ?? []).length === 0 && (
 					<p className="rounded-2xl bg-white px-5 py-4 text-sm text-neutral-500">
 						No mailboxes yet
 					</p>

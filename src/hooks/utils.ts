@@ -1,5 +1,6 @@
 import { authFetch } from "@/lib/auth/client";
 import { parseSearchQuery } from "@/lib/search/query-utils";
+import { readMessageListPayload } from "./message-list-response";
 import type { MessageFilterOptions, MessageFolder } from "./types";
 import type { MessageCounts, MessageListResponse } from "./types";
 
@@ -124,24 +125,34 @@ export async function fetchMessageCounts(mailboxId?: string | null, force = fals
 
 export async function fetchMessageList(params: URLSearchParams, force = false): Promise<MessageListResponse> {
 	const key = params.toString();
-	if (!force && messageListCache.has(key)) return messageListCache.get(key) ?? {};
-	if (messageListRequests.has(key)) return messageListRequests.get(key) ?? {};
+	if (!force && messageListCache.has(key)) {
+		const cached = messageListCache.get(key);
+		if (cached) return cached;
+	}
+	const pending = messageListRequests.get(key);
+	if (pending) return pending;
 
 	const requestGeneration = messageCacheGeneration;
-	const request = authFetch(`/api/messages?${key}`)
-		.then((res) => res.json())
-		.then((data) => {
-			const response = data as MessageListResponse;
-			if (requestGeneration === messageCacheGeneration) {
-				messageListCache.set(key, response);
-			}
-			return response;
-		})
-		.finally(() => {
-			if (requestGeneration === messageCacheGeneration) {
-				messageListRequests.delete(key);
-			}
-		});
+	const request = (async () => {
+		const res = await authFetch(`/api/messages?${key}`);
+		const body = await res.json().catch(() => null);
+		const parsed = readMessageListPayload(res.ok, body);
+		if (!parsed.ok) throw new Error(parsed.error);
+		const response: MessageListResponse = {
+			messages: parsed.messages,
+			total: parsed.total,
+			limit: parsed.limit,
+			offset: parsed.offset,
+		};
+		if (requestGeneration === messageCacheGeneration) {
+			messageListCache.set(key, response);
+		}
+		return response;
+	})().finally(() => {
+		if (requestGeneration === messageCacheGeneration && messageListRequests.get(key) === request) {
+			messageListRequests.delete(key);
+		}
+	});
 
 	messageListRequests.set(key, request);
 	return request;

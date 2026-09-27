@@ -4,6 +4,7 @@ import { getEmailAddress, getEmailAddressList, normalizeEmailAddress } from "@/l
 import { getDisplayNameForAddress } from "@/lib/contacts/utils";
 import { htmlToReadableText, splitRepliedEmailContent } from "@/lib/email/reply-content-utils";
 import { splitQuotedHtml } from "@/components/compose/rich-text-utils";
+import { replaceCidReference } from "./inline-cid";
 import type { Message } from "@/hooks/types";
 import type { MessageAttachment, MessageBodyDisplay, MessageDetailResponse } from "./types";
 
@@ -91,13 +92,10 @@ export function resolveInlineAttachmentUrls(
 ): string | null {
 	if (!htmlBody) return null;
 
-	return attachments.reduce((html, attachment) => {
+	const ordered = [...attachments].sort((left, right) => (right.contentId?.length ?? 0) - (left.contentId?.length ?? 0));
+	return ordered.reduce((html, attachment) => {
 		if (!attachment.contentId) return html;
-		const contentId = attachment.contentId.replace(/^<|>$/g, "");
-		return html.replaceAll(
-			`cid:${contentId}`,
-			getAttachmentUrl(messageId, attachment.id),
-		);
+		return replaceCidReference(html, attachment.contentId, getAttachmentUrl(messageId, attachment.id));
 	}, htmlBody);
 }
 

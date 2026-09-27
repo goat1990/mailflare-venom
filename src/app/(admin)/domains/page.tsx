@@ -44,14 +44,17 @@ export default function DomainsPage() {
   const [dnsError, setDnsError] = useState<string | null>(null);
   const [dnsViews, setDnsViews] = useState<DomainDnsCache>({});
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error: loadError } = useQuery({
     queryKey: ["domains"],
     queryFn: async () => {
       const res = await authFetch("/api/domains?includeDns=true");
-      return (await res.json()) as {
-        domains: Domain[];
-        dns: Record<string, DnsStatusSummary>;
+      const json = (await res.json()) as {
+        domains?: Domain[];
+        dns?: Record<string, DnsStatusSummary>;
+        error?: string;
       };
+      if (!res.ok) throw new Error(json.error ?? "Could not load domains");
+      return { domains: json.domains ?? [], dns: json.dns ?? {} };
     },
   });
 
@@ -316,7 +319,12 @@ export default function DomainsPage() {
         {isLoading && (
           <SectionRowSkeleton />
         )}
-        {!isLoading && (data?.domains ?? []).length === 0 && (
+        {isError && (
+          <p role="alert" className="rounded-2xl bg-white px-5 py-4 text-sm text-red-600">
+            {loadError instanceof Error ? loadError.message : "Could not load domains"}
+          </p>
+        )}
+        {!isLoading && !isError && (data?.domains ?? []).length === 0 && (
           <p className="rounded-2xl bg-white px-5 py-4 text-sm text-neutral-500">
             No domains yet
           </p>

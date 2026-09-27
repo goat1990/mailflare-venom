@@ -24,6 +24,7 @@ import {
 	hasMeaningfulHtml,
 	htmlToPlainText,
 	joinQuotedHtml,
+	sanitizeComposerHtml,
 	splitQuotedHtml,
 	textToHtml,
 } from "./rich-text-utils";
@@ -142,8 +143,8 @@ export function ComposeForm({
 				);
 				setSubject(draft.subject ?? "");
 				const stored = splitQuotedHtml(draft.htmlBody || textToHtml(draft.textBody));
-				setHtml(stored.body);
-				setQuotedHtml(stored.quoted);
+				setHtml(sanitizeComposerHtml(stored.body));
+				setQuotedHtml(stored.quoted ? sanitizeComposerHtml(stored.quoted) : null);
 				setStoredAttachments(draft.attachments?.filter((item) => item.disposition === "attachment") ?? []);
 				setLoadedDraftMailboxId(draft.mailboxId);
 				setLoadedDraftFrom(getEmailAddress(draft.fromAddr).toLowerCase());
@@ -191,33 +192,41 @@ export function ComposeForm({
 		if (saveTimer.current) clearTimeout(saveTimer.current);
 
 		const generation = draftGeneration.current;
-		saveTimer.current = setTimeout(async () => {
-			const payload = {
-				mailboxId: selectedMailbox?.id,
-				from: fromAddr,
-				to: recipientsToHeader(to),
-				cc: recipientsToHeader(cc),
-				bcc: recipientsToHeader(bcc),
-				subject,
-				html: joinQuotedHtml(html, quotedHtml),
-				text: htmlToPlainText(joinQuotedHtml(html, quotedHtml)),
-				inReplyTo: threading?.inReplyTo ?? null,
-				references: threading?.references ?? null,
-				threadId: threading?.threadId ?? null,
-			};
-			const res = await authFetch(draftId ? `/api/drafts/${draftId}` : "/api/drafts", {
-				method: draftId ? "PATCH" : "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(payload),
-			});
-			const data = (await res.json()) as { draft?: { id: string } };
-			if (res.ok && data.draft?.id) {
-				if (generation !== draftGeneration.current) {
-					void authFetch(`/api/drafts/${data.draft.id}`, { method: "DELETE" });
-					return;
+		saveTimer.current = setTimeout(() => {
+			void (async () => {
+				const payload = {
+					mailboxId: selectedMailbox?.id,
+					from: fromAddr,
+					to: recipientsToHeader(to),
+					cc: recipientsToHeader(cc),
+					bcc: recipientsToHeader(bcc),
+					subject,
+					html: joinQuotedHtml(html, quotedHtml),
+					text: htmlToPlainText(joinQuotedHtml(html, quotedHtml)),
+					inReplyTo: threading?.inReplyTo ?? null,
+					references: threading?.references ?? null,
+					threadId: threading?.threadId ?? null,
+				};
+				try {
+					const res = await authFetch(draftId ? `/api/drafts/${draftId}` : "/api/drafts", {
+						method: draftId ? "PATCH" : "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify(payload),
+					});
+					const data = (await res.json().catch(() => ({}))) as { draft?: { id: string }; error?: string };
+					if (generation !== draftGeneration.current) {
+						if (res.ok && data.draft?.id) void authFetch(`/api/drafts/${data.draft.id}`, { method: "DELETE" });
+						return;
+					}
+					if (!res.ok || !data.draft?.id) {
+						throw new Error(data.error || "Could not save draft");
+					}
+					setDraftId(data.draft.id);
+				} catch (cause) {
+					if (generation !== draftGeneration.current) return;
+					setToast({ type: "error", message: cause instanceof Error ? cause.message : "Could not save draft" });
 				}
-				setDraftId(data.draft.id);
-			}
+			})();
 		}, 900);
 
 		return () => {

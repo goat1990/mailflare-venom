@@ -27,4 +27,5 @@ export type ConversationMessageCardProps = {
 export type UseMessageThreadResult = {
 	messages: ThreadMessage[];
 	loading: boolean;
+	error: string | null;
 };

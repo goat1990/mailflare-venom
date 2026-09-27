@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { HelpCircle, Sparkles } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { HelpCircle, Menu, Sparkles } from "lucide-react";
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { ComposeProvider } from "@/components/compose/compose-context";
 import { FloatingComposer } from "@/components/compose/floating-composer";
@@ -27,9 +28,24 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
   const { assistantOpen, setAssistantOpen, assistantFullSize, setAssistantFullSize } = useDashboardState();
   const assistantEnabled = useAssistantAvailability();
   const assistantVisible = assistantEnabled === true && assistantOpen;
+  const [narrow, setNarrow] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 480px)");
+    const sync = () => setNarrow(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    setNavOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     if (assistantEnabled === false && (assistantOpen || assistantFullSize)) {
@@ -45,15 +61,47 @@ export default function DashboardLayout({
           <ComposeProvider>
             <MailSearchProvider>
               <ShortcutsProvider>
-                <div className="grid h-dvh grid-cols-[var(--sidebar-width)_minmax(0,1fr)] overflow-hidden bg-[#f6f8fc] transition-[grid-template-columns]" style={{ transitionDuration: "var(--sidebar-transition-duration)" }}>
-                  <aside className="relative min-h-0 min-w-0">
+                <div className="flex h-dvh overflow-hidden bg-[#f6f8fc]">
+                  {narrow && navOpen && (
+                    <button
+                      type="button"
+                      className="fixed inset-0 z-30 bg-neutral-900/30"
+                      aria-label="Close folder navigation"
+                      onClick={() => setNavOpen(false)}
+                    />
+                  )}
+                  <aside
+                    id="folder-navigation"
+                    className={clsx(
+                      "min-h-0 shrink-0 bg-[#f6f8fc]",
+                      narrow
+                        ? "fixed inset-y-0 left-0 z-40 w-72 max-w-[calc(100vw-3rem)] shadow-xl transition-transform duration-200"
+                        : "relative",
+                      narrow && !navOpen && "-translate-x-full",
+                    )}
+                    style={narrow ? undefined : { width: "var(--sidebar-width)", transitionDuration: "var(--sidebar-transition-duration)" }}
+                    aria-hidden={narrow && !navOpen}
+                    inert={narrow && !navOpen ? true : undefined}
+                  >
                     <div className="h-full overflow-y-auto overscroll-contain px-3 py-4 scrollbar-gutter-stable">
                       <DashboardNav />
                     </div>
-                    <SidebarResizeBoundary />
+                    {!narrow && <SidebarResizeBoundary />}
                   </aside>
-                  <div className="flex min-h-0 min-w-0 flex-col">
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                     <header className="flex h-16 w-full shrink-0 items-center gap-3 pr-4 text-sm">
+                      {narrow && (
+                        <button
+                          type="button"
+                          className="ml-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-700 hover:bg-neutral-200"
+                          aria-label="Open folders"
+                          aria-expanded={navOpen}
+                          aria-controls="folder-navigation"
+                          onClick={() => setNavOpen(true)}
+                        >
+                          <Menu className="h-5 w-5" />
+                        </button>
+                      )}
                       <MailSearchInput />
                       <Link
                         href="/settings/account"

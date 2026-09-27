@@ -4,6 +4,8 @@
  * a single source of truth for what the message says.
  */
 
+import { sanitizeComposerHtml as sanitizeComposerHtmlImpl } from "./composer-html.mjs";
+
 export const QUOTE_ATTRIBUTE = "data-mailflare-quote";
 const QUOTE_OPEN = `<div class="mailflare-quote" ${QUOTE_ATTRIBUTE}="1">`;
 const SIGNATURE_ATTRIBUTE = "data-mailflare-signature";
@@ -14,6 +16,22 @@ export function escapeHtml(value: string): string {
 		.replace(/</g, "&lt;")
 		.replace(/>/g, "&gt;")
 		.replace(/"/g, "&quot;");
+}
+
+/** Draft HTML is untrusted. Strip active content and leave formatting in place. */
+export function sanitizeComposerHtml(html: string): string {
+	return sanitizeComposerHtmlImpl(html);
+}
+
+/** Put sanitized draft HTML into an element without assigning it through innerHTML. */
+export function applySanitizedHtml(element: HTMLElement, html: string): void {
+	const safe = sanitizeComposerHtml(html);
+	if (typeof DOMParser === "undefined") {
+		element.textContent = safe;
+		return;
+	}
+	const parsed = new DOMParser().parseFromString(`<body>${safe}</body>`, "text/html");
+	element.replaceChildren(...Array.from(parsed.body.childNodes));
 }
 
 /** Plain text as HTML: escaped, with line breaks preserved. */
