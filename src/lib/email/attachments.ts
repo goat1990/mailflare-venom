@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { messageAttachments, messages } from "@/db/schema";
 import { newId } from "@/lib/ids";
@@ -13,6 +13,14 @@ import type {
 export const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 export const MAX_TOTAL_ATTACHMENT_SIZE = 20 * 1024 * 1024;
 export const MAX_ATTACHMENT_COUNT = 10;
+
+/** An attachment row whose object is gone; sending or copying without it would silently drop a file. */
+export class MissingAttachmentError extends Error {
+	constructor(filename: string) {
+		super(`Attachment ${filename} is missing from storage`);
+		this.name = "MissingAttachmentError";
+	}
+}
 
 export function decodeBase64Content(content: string): ArrayBuffer {
 	const binary = atob(content.replace(/\s/g, ""));
@@ -102,11 +110,19 @@ export async function storeMessageAttachments(
 			});
 		}
 	} catch (error) {
-		await Promise.all(stored.map((attachment) => env.BUCKET.delete(attachment.r2Key)));
+		await removeAttachments(env, stored.map((attachment) => ({ id: attachment.id, r2Key: attachment.r2Key })));
 		throw error;
 	}
 
 	return stored;
+}
+
+/** Undo a partial store or copy: rows as well as objects, so no row outlives its bytes. */
+async function removeAttachments(env: CloudflareEnv, attachments: Array<{ id: string; r2Key: string }>): Promise<void> {
+	if (attachments.length === 0) return;
+	const db = getDb(env);
+	await db.delete(messageAttachments).where(inArray(messageAttachments.id, attachments.map((attachment) => attachment.id)));
+	await Promise.all(attachments.map((attachment) => env.BUCKET.delete(attachment.r2Key)));
 }
 
 /**
@@ -122,34 +138,41 @@ export async function copyMessageAttachments(
 	const db = getDb(env);
 	const rows = await db.select().from(messageAttachments).where(eq(messageAttachments.messageId, fromMessageId));
 	const copied: AttachmentMetadata[] = [];
-	for (const row of rows) {
-		const object = await env.BUCKET.get(row.r2Key);
-		if (!object) continue;
-		const id = newId("att");
-		const r2Key = `attachments/${toMessageId}/${id}/${row.filename}`;
-		await env.BUCKET.put(r2Key, await object.arrayBuffer(), {
-			httpMetadata: { contentType: row.contentType },
-			customMetadata: { filename: row.filename, messageId: toMessageId },
-		});
-		await db.insert(messageAttachments).values({
-			id,
-			messageId: toMessageId,
-			filename: row.filename,
-			contentType: row.contentType,
-			size: row.size,
-			disposition: row.disposition,
-			contentId: row.contentId,
-			r2Key,
-		});
-		copied.push({
-			id,
-			messageId: toMessageId,
-			filename: row.filename,
-			type: row.contentType,
-			size: row.size,
-			disposition: row.disposition as "attachment" | "inline",
-			contentId: row.contentId,
-		});
+	const written: Array<{ id: string; r2Key: string }> = [];
+	try {
+		for (const row of rows) {
+			const object = await env.BUCKET.get(row.r2Key);
+			if (!object) throw new MissingAttachmentError(row.filename);
+			const id = newId("att");
+			const r2Key = `attachments/${toMessageId}/${id}/${row.filename}`;
+			await env.BUCKET.put(r2Key, await object.arrayBuffer(), {
+				httpMetadata: { contentType: row.contentType },
+				customMetadata: { filename: row.filename, messageId: toMessageId },
+			});
+			written.push({ id, r2Key });
+			await db.insert(messageAttachments).values({
+				id,
+				messageId: toMessageId,
+				filename: row.filename,
+				contentType: row.contentType,
+				size: row.size,
+				disposition: row.disposition,
+				contentId: row.contentId,
+				r2Key,
+			});
+			copied.push({
+				id,
+				messageId: toMessageId,
+				filename: row.filename,
+				type: row.contentType,
+				size: row.size,
+				disposition: row.disposition as "attachment" | "inline",
+				contentId: row.contentId,
+			});
+		}
+	} catch (error) {
+		await removeAttachments(env, written);
+		throw error;
 	}
 	return copied;
 }
@@ -164,7 +187,7 @@ export async function loadMessageAttachmentContents(
 	const result: AttachmentContent[] = [];
 	for (const row of rows) {
 		const object = await env.BUCKET.get(row.r2Key);
-		if (!object) continue;
+		if (!object) throw new MissingAttachmentError(row.filename);
 		result.push({
 			filename: row.filename,
 			type: row.contentType,

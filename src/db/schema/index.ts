@@ -332,7 +332,8 @@ export const outboundJobs = sqliteTable("outbound_jobs", {
 		.notNull()
 		.references(() => users.id, { onDelete: "cascade" }),
 	messageId: text("message_id").references(() => messages.id, { onDelete: "set null" }),
-	status: text("status", { enum: ["queued", "sent", "failed"] }).notNull().default("queued"),
+	// "sending" is claimed before the provider is called, so a redelivered queue message cannot send twice.
+	status: text("status", { enum: ["queued", "sending", "sent", "failed"] }).notNull().default("queued"),
 	payload: text("payload").notNull(),
 	error: text("error"),
 	scheduledAt: integer("scheduled_at", { mode: "timestamp" }),

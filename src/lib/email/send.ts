@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { messages, outboundJobs } from "@/db/schema";
 import { newId } from "@/lib/ids";
@@ -9,7 +9,7 @@ import { getAuthorizedSenderAddress } from "@/lib/email/sender";
 import { getEmailAddressList, joinEmailAddressList, splitEmailAddressList } from "@/lib/email/address";
 import { formatMessageIdHeader, normalizeMessageId, parseMessageIdList } from "@/lib/email/threading";
 import { createAuditLog } from "@/lib/mailboxes/audit";
-import { loadMessageAttachmentContents, storeMessageAttachments, validateAttachments } from "@/lib/email/attachments";
+import { loadMessageAttachmentContents, MissingAttachmentError, storeMessageAttachments, validateAttachments } from "@/lib/email/attachments";
 import type { AttachmentContent } from "@/lib/email/attachment-types";
 
 export type SendEmailInput = {
@@ -168,8 +168,9 @@ async function deliverEmail(env: CloudflareEnv, delivery: PreparedDelivery): Pro
 	const { input, messageId, jobId, from, mailboxId, to, cc, bcc, headers, attachments } = delivery;
 	const db = getDb(env);
 	const toAddr = joinEmailAddressList(to);
+	let response: EmailSendResult;
 	try {
-		const response = await env.EMAIL.send({
+		response = await env.EMAIL.send({
 			from,
 			to,
 			...(cc.length ? { cc } : {}),
@@ -195,7 +196,14 @@ async function deliverEmail(env: CloudflareEnv, delivery: PreparedDelivery): Pro
 						},
 			),
 		});
+	} catch (err) {
+		await failDelivery(env, delivery, err);
+		throw err;
+	}
 
+	// The message has left. A failure from here on is logged, never recorded as a failed send,
+	// which would invite the caller to send it again.
+	try {
 		// A fresh message starts its own conversation; Cloudflare's Message-ID is what
 		// any reply will name in In-Reply-To, so key the thread by it.
 		await db
@@ -221,16 +229,20 @@ async function deliverEmail(env: CloudflareEnv, delivery: PreparedDelivery): Pro
 			action: "email.send",
 			metadata: { to: toAddr, cc: cc.length ? joinEmailAddressList(cc) : undefined, subject: input.subject },
 		});
-	} catch (err) {
-		const error = err instanceof Error ? err.message : "Send failed";
-		await db.update(messages).set({ status: "failed" }).where(eq(messages.id, messageId));
-		await db
-			.update(outboundJobs)
-			.set({ status: "failed", error, updatedAt: new Date() })
-			.where(eq(outboundJobs.id, jobId));
-		await dispatchWebhooks(env, input.userId, "message.failed", { messageId, error });
-		throw err;
+	} catch (error) {
+		console.error(`Recording sent message ${messageId} failed`, error);
 	}
+}
+
+async function failDelivery(env: CloudflareEnv, delivery: PreparedDelivery, err: unknown): Promise<void> {
+	const db = getDb(env);
+	const error = err instanceof Error ? err.message : "Send failed";
+	await db.update(messages).set({ status: "failed" }).where(eq(messages.id, delivery.messageId));
+	await db
+		.update(outboundJobs)
+		.set({ status: "failed", error, updatedAt: new Date() })
+		.where(eq(outboundJobs.id, delivery.jobId));
+	await dispatchWebhooks(env, delivery.input.userId, "message.failed", { messageId: delivery.messageId, error });
 }
 
 export type OutboundQueueMessage = {
@@ -299,6 +311,22 @@ export async function processOutboundQueue(
 		await enqueueScheduledDelivery(env, delivery, scheduledAt);
 		return;
 	}
-	delivery.attachments = await loadMessageAttachmentContents(env, payload.messageId);
+	const [claimed] = await db
+		.update(outboundJobs)
+		.set({ status: "sending", updatedAt: new Date() })
+		.where(and(eq(outboundJobs.id, payload.jobId), eq(outboundJobs.status, "queued")))
+		.returning({ id: outboundJobs.id });
+	if (!claimed) return;
+	try {
+		delivery.attachments = await loadMessageAttachmentContents(env, payload.messageId);
+	} catch (error) {
+		if (error instanceof MissingAttachmentError) {
+			await failDelivery(env, delivery, error);
+			return;
+		}
+		// Anything else may pass; release the claim so the queue's retry can send.
+		await db.update(outboundJobs).set({ status: "queued", updatedAt: new Date() }).where(eq(outboundJobs.id, payload.jobId));
+		throw error;
+	}
 	await deliverEmail(env, delivery);
 }
