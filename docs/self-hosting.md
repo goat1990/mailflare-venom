@@ -8,7 +8,7 @@ realtime WebSocket, backup schedule and an SMTP listener for inbound mail.
 ## Quick start
 
 ```bash
-git clone https://github.com/hieunc229/mailflare && cd mailflare
+git clone https://github.com/goat1990/mailflare-venom && cd mailflare-venom
 cp .env.docker.example .env.docker      # edit: how to receive and send mail
 docker compose up -d --build
 ```
@@ -88,8 +88,8 @@ and the DNS page shows what to set by hand.
 - **Backups.** The daily 02:00 UTC backup and the admin Backups page work
   unchanged; files land under `/data/blobs/backups`. Back up the whole volume
   for a full copy.
-- **Updates.** Pull the new image and recreate the container; migrations run
-  at start. The in-app update button is disabled on self-hosted installs.
+- **Updates.** Pull the image you build from this repository and recreate
+  the container; migrations run at start. There is no in-app updater.
 - **Logs.** `docker compose logs -f mailflare`.
 - **Queues.** Jobs are held in memory. Inbound mail is written to the volume
   before it is queued, so a restart never loses a message; at worst one

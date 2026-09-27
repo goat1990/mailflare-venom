@@ -4,8 +4,6 @@
 
 Mailflare is a self-hosted email inbox for custom domains, built on Cloudflare.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/hieunc229/mailflare)
-
 ## Screenshots
 
 | ![Inbox](/screenshots/1.png)<br>Inbox | ![Manage domains](/screenshots/2.png)<br>Manage domains | ![Manage inboxes](/screenshots/3.png)<br>Manage inboxes |
@@ -48,15 +46,15 @@ A [Paid Worker](https://developers.cloudflare.com/workers/platform/pricing/) pla
 
 Getting started takes three steps:
 
-1. **Deploy the app.** Click **Deploy to Cloudflare** and keep the app name as `mailflare`. The app will not work correctly under another Worker name.
+1. **Deploy the app.** From this repository, run `npm run deploy` and keep the Worker name as `mailflare`. The app will not work correctly under another Worker name.
 2. **Complete setup.** Open the deployed app and follow `/setup` to check the installation and create your admin account.
 3. **Connect your domain.** Add a domain managed by the same Cloudflare account. Mailflare configures its email routing and helps you create the first mailbox.
 
-⚠️ IMPORTANT: **`CF_TOKEN` is required during deployment**. Create a scoped [Cloudflare API token with the following permissions](https://github.com/hieunc229/mailflare/issues/24#issuecomment-5523686105) for the domains you want to connect.
+⚠️ IMPORTANT: **`CF_TOKEN` is required during deployment**. Create a scoped Cloudflare API token with the following permissions for the domains you want to connect.
 - All accounts - Email Sending:Edit, DNS Settings:Edit, Email Routing Addresses:Edit
 - All zones - DNS Settings:Edit, Email Routing Rules:Edit, Zone Settings:Edit, DNS:Edit
 
-See the [deployment guide](docs/deployment.md) for required permissions, manual deployment, backups, and updates.
+See the [deployment guide](docs/deployment.md) for required permissions, manual deployment, and backups.
 
 ### Self-host with Docker instead
 
