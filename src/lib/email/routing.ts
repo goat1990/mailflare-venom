@@ -1,9 +1,10 @@
-import { eq, and, asc, desc } from "drizzle-orm";
+import { eq, and, asc, desc, sql } from "drizzle-orm";
 import type { AppDatabase } from "@/db";
 import { domains, folders, mailboxAliases, mailboxes, routingRules } from "@/db/schema";
 import { getEmailAddress } from "@/lib/email/address";
 import { getMailboxDomainAddresses } from "@/lib/mailboxes/domain-addresses";
-import { normalizeRecipientLocalPart, parseRecipientAddress } from "@/lib/email/recipient-address";
+import { parseRecipientAddress, rankLocalPartMatch } from "@/lib/email/recipient-address";
+import type { ParsedRecipientAddress } from "@/lib/email/recipient-address-types";
 
 export type ResolvedMailbox = {
 	mailboxId: string;
@@ -82,16 +83,7 @@ export async function resolveInboundAddress(
 	}
 
 	// Phase 2 — a real mailbox always wins over a catch-all.
-	const exactMailboxes = await db
-		.select()
-		.from(mailboxes)
-		.where(and(eq(mailboxes.domainId, domain.id), eq(mailboxes.disabled, false)));
-	const exactMailbox = exactMailboxes.find(
-		(mailbox) => normalizeRecipientLocalPart(mailbox.localPart) === parsed.localPart,
-	);
-	const mailbox = exactMailbox
-		?? await resolveMailboxAlias(db, domain.id, parsed.localPart)
-		?? await resolveMailboxDomainAlias(db, parsed.localPart, parsed.normalizedAddress);
+	const mailbox = await findAddressMailbox(db, domain.id, parsed);
 
 	if (mailbox) {
 		return {
@@ -125,6 +117,112 @@ export async function resolveInboundAddress(
 	}
 
 	return null;
+}
+
+/**
+ * The mailbox that keeps a message the edge has already accepted. Reject and forward only work
+ * on the live message, so once a message is queued it is stored: where its route delivers, else
+ * in the mailbox that owns the address, else with the recipient domain's owner. `blocked` marks
+ * mail that a reject rule matches now but that was accepted before the rule could refuse it.
+ */
+export async function resolveAcceptedMailbox(
+	db: AppDatabase,
+	toAddress: string,
+	fromAddress?: string | null,
+): Promise<{ mailbox: ResolvedMailbox; blocked: boolean } | null> {
+	const decision = await resolveInboundAddress(db, toAddress, fromAddress);
+	if (decision?.mailbox) return { mailbox: decision.mailbox, blocked: false };
+
+	const parsed = parseRecipientAddress(toAddress);
+	if (!parsed) return null;
+	const [domain] = await db.select().from(domains).where(eq(domains.hostname, parsed.domain)).limit(1);
+	if (!domain) return null;
+
+	const addressMailbox = await findAddressMailbox(db, domain.id, parsed);
+	const mailbox = addressMailbox
+		? toResolvedMailbox(addressMailbox, domain.id, domain.hostname)
+		: await findDomainOwnerMailbox(db, domain);
+	return mailbox ? { mailbox, blocked: decision?.action === "reject" } : null;
+}
+
+async function findDomainOwnerMailbox(
+	db: AppDatabase,
+	domain: typeof domains.$inferSelect,
+): Promise<ResolvedMailbox | null> {
+	const rows = await db
+		.select({ mailbox: mailboxes, hostname: domains.hostname })
+		.from(mailboxes)
+		.innerJoin(domains, eq(mailboxes.domainId, domains.id))
+		.where(and(eq(mailboxes.userId, domain.userId), eq(mailboxes.disabled, false)))
+		.orderBy(asc(mailboxes.createdAt), asc(mailboxes.id));
+	const row = rows.find((item) => item.mailbox.domainId === domain.id) ?? rows[0];
+	return row ? toResolvedMailbox(row.mailbox, row.mailbox.domainId, row.hostname) : null;
+}
+
+type MailboxRow = typeof mailboxes.$inferSelect;
+
+/**
+ * The closest owner of an address on a domain: its mailboxes and aliases, then mailboxes that
+ * answer on every domain. A closer match wins across all three; ties go to the domain's own
+ * addresses, then to the oldest.
+ */
+async function findAddressMailbox(
+	db: AppDatabase,
+	domainId: string,
+	recipient: ParsedRecipientAddress,
+): Promise<MailboxRow | null> {
+	const direct = await db
+		.select()
+		.from(mailboxes)
+		.where(and(eq(mailboxes.domainId, domainId), eq(mailboxes.disabled, false)))
+		.orderBy(asc(mailboxes.createdAt), asc(mailboxes.id));
+	const aliases = await db
+		.select({ mailbox: mailboxes, localPart: mailboxAliases.localPart })
+		.from(mailboxAliases)
+		.innerJoin(mailboxes, eq(mailboxAliases.mailboxId, mailboxes.id))
+		.where(and(eq(mailboxAliases.domainId, domainId), eq(mailboxes.disabled, false)))
+		.orderBy(asc(mailboxAliases.createdAt), asc(mailboxAliases.id));
+	const onDomain = closestLocalPart(
+		[...direct.map((mailbox) => ({ mailbox, localPart: mailbox.localPart })), ...aliases],
+		recipient.addressedLocalPart,
+	);
+	if (onDomain?.rank === 0) return onDomain.mailbox;
+	const everyDomain = await findMultiDomainMailbox(db, recipient, onDomain?.rank ?? Number.POSITIVE_INFINITY);
+	return everyDomain ?? onDomain?.mailbox ?? null;
+}
+
+function closestLocalPart<T extends { localPart: string }>(
+	candidates: T[],
+	addressedLocalPart: string,
+	closerThan = Number.POSITIVE_INFINITY,
+): (T & { rank: number }) | null {
+	let best: (T & { rank: number }) | null = null;
+	for (const candidate of candidates) {
+		const rank = rankLocalPartMatch(candidate.localPart, addressedLocalPart);
+		if (rank === null || rank >= (best?.rank ?? closerThan)) continue;
+		best = { ...candidate, rank };
+	}
+	return best;
+}
+
+async function findMultiDomainMailbox(
+	db: AppDatabase,
+	recipient: ParsedRecipientAddress,
+	closerThan: number,
+): Promise<MailboxRow | null> {
+	const candidates = await db
+		.select()
+		.from(mailboxes)
+		.where(and(eq(mailboxes.useAllDomains, true), eq(mailboxes.disabled, false)))
+		.orderBy(asc(mailboxes.createdAt), asc(mailboxes.id));
+	let best: { mailbox: MailboxRow; rank: number } | null = null;
+	for (const mailbox of candidates) {
+		const match = closestLocalPart([{ mailbox, localPart: mailbox.localPart }], recipient.addressedLocalPart, best?.rank ?? closerThan);
+		if (!match) continue;
+		const addresses = await getMailboxDomainAddresses(db, mailbox);
+		if (addresses.includes(`${mailbox.localPart}@${recipient.domain}`.toLowerCase())) best = match;
+	}
+	return best?.mailbox ?? null;
 }
 
 async function listDomainRules(db: AppDatabase, domainId: string): Promise<RuleRow[]> {
@@ -181,51 +279,10 @@ function toResolvedMailbox(
 
 /** Records that a domain rule fired, for the "last matched" column in the routing UI. */
 export async function recordRuleMatch(db: AppDatabase, ruleId: string): Promise<void> {
-	const [rule] = await db
-		.select({ matchCount: routingRules.matchCount })
-		.from(routingRules)
-		.where(eq(routingRules.id, ruleId))
-		.limit(1);
-	if (!rule) return;
 	await db
 		.update(routingRules)
-		.set({ matchCount: rule.matchCount + 1, lastMatchedAt: new Date() })
+		.set({ matchCount: sql`${routingRules.matchCount} + 1`, lastMatchedAt: new Date() })
 		.where(eq(routingRules.id, ruleId));
-}
-
-async function resolveMailboxAlias(db: AppDatabase, domainId: string, localPart: string) {
-	const rows = await db
-		.select({ mailbox: mailboxes, aliasLocalPart: mailboxAliases.localPart })
-		.from(mailboxAliases)
-		.innerJoin(mailboxes, eq(mailboxAliases.mailboxId, mailboxes.id))
-		.where(and(
-			eq(mailboxAliases.domainId, domainId),
-			eq(mailboxes.disabled, false),
-		));
-	const row = rows.find(
-		(item) => normalizeRecipientLocalPart(item.aliasLocalPart) === localPart,
-	);
-	return row?.mailbox ?? null;
-}
-
-async function resolveMailboxDomainAlias(
-	db: AppDatabase,
-	localPart: string,
-	normalizedAddress: string,
-) {
-	const candidates = await db
-		.select()
-		.from(mailboxes)
-		.where(and(eq(mailboxes.useAllDomains, true), eq(mailboxes.disabled, false)));
-
-	for (const mailbox of candidates) {
-		if (normalizeRecipientLocalPart(mailbox.localPart) !== localPart) continue;
-		const addresses = await getMailboxDomainAddresses(db, mailbox);
-		if (addresses.some((address) => parseRecipientAddress(address)?.normalizedAddress === normalizedAddress)) {
-			return mailbox;
-		}
-	}
-	return null;
 }
 
 export async function resolveInboxRuleDestination(

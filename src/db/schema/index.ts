@@ -241,11 +241,14 @@ export const messages = sqliteTable(
 		spamSignals: text("spam_signals"),
 		spamAnalyzedAt: integer("spam_analyzed_at", { mode: "timestamp" }),
 		spamAnalysisError: text("spam_analysis_error"),
+		// Mailbox plus Message-ID for delivered mail, so a retried or doubly routed message is stored once.
+		inboundDedupeKey: text("inbound_dedupe_key"),
 		createdAt: integer("created_at", { mode: "timestamp" })
 			.notNull()
 			.$defaultFn(() => new Date()),
 	},
 	(t) => [
+		uniqueIndex("messages_inbound_dedupe_idx").on(t.inboundDedupeKey),
 		index("messages_user_created_idx").on(t.userId, t.createdAt),
 		index("messages_mailbox_idx").on(t.mailboxId),
 		index("messages_folder_idx").on(t.folderId),
