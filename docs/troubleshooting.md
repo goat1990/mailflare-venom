@@ -2,7 +2,7 @@
 
 ## Cloudflare error 9109: Invalid access token
 
-The Deploy to Cloudflare flow can deploy the Worker, but its deployment token is not exposed to Mailflare at runtime. Create a separate Cloudflare API token and set it as `CF_TOKEN`.
+The token used to deploy the Worker is not exposed to Mailflare at runtime. Create a separate Cloudflare API token and set it as `CF_TOKEN`.
 
 Verify the token:
 

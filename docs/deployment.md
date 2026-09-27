@@ -1,12 +1,12 @@
 # Deployment and configuration
 
-This guide covers Cloudflare deployment, runtime configuration, database backups, and application updates.
+This guide covers Cloudflare deployment, runtime configuration, database backups, and schema migrations.
 
 ## Overview
 
 Set up Mailflare in three steps:
 
-1. **Deploy the app:** use the Deploy to Cloudflare button, set the app name to `mailflare`, and provide the required `CF_TOKEN`.
+1. **Deploy the app:** from this repository, run `npm run deploy`, keep the Worker name `mailflare`, and provide the required `CF_TOKEN`.
 2. **Complete setup:** open the deployed app and follow `/setup` to check the installation and create the first admin account.
 3. **Connect your domain:** add a domain managed by the same Cloudflare account. Mailflare configures email routing and, when available and selected, email sending before helping you create the first mailbox.
 
@@ -14,13 +14,17 @@ The Worker name must remain `mailflare`. Before starting, create the required `C
 
 ## Step 1: Deploy mailflare
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/hieunc229/mailflare)
+From this repository:
 
-1. Click **Deploy to Cloudflare** above and sign in to Cloudflare if prompted.
-2. Choose the Cloudflare account that owns the domain you want to use.
-3. Set the app name to exactly `mailflare`. Do not rename it.
-4. Add `CF_TOKEN` when Cloudflare asks for the app's runtime variables or secrets.
-5. Start the deployment and wait for Cloudflare to finish provisioning and deploying the Worker.
+```bash
+npm install
+npm run deploy
+```
+
+1. Sign in to the Cloudflare account that owns the domain you want to use.
+2. Keep the Worker name exactly `mailflare`. Do not rename it. Email Routing rules target that name.
+3. Set `CF_TOKEN` as a Worker secret before the app serves mail.
+4. Wait for Wrangler to finish provisioning and deploying the Worker.
 
 ### Required configuration
 
@@ -87,37 +91,17 @@ In the inbox, open **Assistant → Settings** for a mailbox, select its reviewer
 
 The assistant panel no longer exposes MCP key management. External MCP clients can still connect to `https://<your-mailflare-origin>/mcp` with a mailbox-scoped Bearer key created through the authenticated `/api/agent/mcp-keys` endpoint. Keys can be listed and revoked through that endpoint; a new key is shown only once. The server uses Streamable HTTP and accepts clients that can set a Bearer header. Its `request_send` tool returns a Mailflare review URL; the MCP key cannot confirm or deliver messages directly. MCP does not require Workers AI for read and draft tools.
 
-## Updating Mailflare
+## Schema migrations
 
-The **Update Mailflare** button in the admin dashboard dispatches `.github/workflows/deploy-update.yml` in the installation repository. The workflow replaces the installation branch's complete tracked tree with the latest upstream source, commits that replacement, and pushes it. This avoids merge conflicts between independently created installation and upstream histories. Target-only committed files and code changes are intentionally removed; repository variables, secrets, and other GitHub or Cloudflare configuration remain unchanged. A connected Cloudflare Git integration then builds and deploys the change.
+This install does not pull application source from another repository. Deploy changes by building and uploading this repository with `npm run deploy`. There is no admin button that dispatches a GitHub workflow.
 
-### Auto update
+Deployment and database migration are separate. After a deploy, apply pending D1 migrations with:
 
-Create a fine-grained personal access token for the installation repository with these repository permissions:
+```bash
+npm run db:migrate:remote
+```
 
-| Permission | Access | Used for |
-| --- | --- | --- |
-| Actions | Read and write | Dispatching `deploy-update.yml` from the Mailflare admin dashboard |
-| Contents | Read and write | Committing and pushing the upstream source into the installation repository |
-| Workflows | Read and write | Replacing files inside `.github/workflows` during an update |
-
-Configure the token and repository details in both Cloudflare and GitHub:
-
-| Location | Name | Type | Value |
-| --- | --- | --- | --- |
-| Cloudflare Worker | `GITHUB_UPDATE_TOKEN` | Secret | The fine-grained personal access token |
-| Cloudflare Worker | `GITHUB_UPDATE_REPO` | Variable | The installation repository in `owner/repository` format |
-| Cloudflare Worker | `GITHUB_UPDATE_REF` | Optional variable | The installation branch to update; omit it to use the repository's default branch |
-| GitHub repository → Actions | `MAILFLARE_UPDATE_TOKEN` | Repository secret | The same fine-grained personal access token |
-| GitHub repository → Actions | `UPDATE_SOURCE_REPOSITORY` | Optional repository variable | The upstream repository; defaults to `hieunc229/mailflare` |
-
-The same token can be used for `GITHUB_UPDATE_TOKEN` and `MAILFLARE_UPDATE_TOKEN` when it has all three permissions above. Keep both values secret and limit the token's repository access to the installation repository.
-
-Make sure `.github/workflows/deploy-update.yml` exists on the installation branch. If it is missing, create the file and copy its contents from the [canonical Mailflare update workflow](https://github.com/hieunc229/mailflare/blob/main/.github/workflows/deploy-update.yml). If an older installation has a different updater, replace it with the latest canonical workflow once. A running workflow cannot create or replace itself until the current workflow has been installed manually.
-
-After the GitHub Action completes successfully, wait for the connected Cloudflare deployment to finish before refreshing Mailflare or applying pending database migrations. The workflow updates the repository first; the new application version is not live until Cloudflare completes its deployment.
-
-Deployment and database migration are separate. After Cloudflare deploys a repository push or an admin-triggered update, open or refresh **Admin settings**. The application update card shows any pending database migrations. Select **Update database** to apply them through the Worker's D1 binding. The same runner initializes a new database during setup.
+The same runner initializes a new database during setup. An administrator can also call `GET` and `POST /api/admin/migrations` with an admin session. Self-hosted installs apply `drizzle/migrations` when the process starts.
 
 If the Cloudflare dashboard has a custom deploy command containing `wrangler d1 migrations apply DB --remote`, remove that part and use `npm run deploy`.
 
