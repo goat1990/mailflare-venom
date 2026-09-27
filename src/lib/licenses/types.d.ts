@@ -11,6 +11,7 @@ export type PaymugLicenseResponse = {
 	productId?: string;
 	plan?: string;
 	features?: string[];
+	endsAt: Date | null;
 };
 
 export type LicenseStatus = {

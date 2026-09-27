@@ -1,10 +1,20 @@
+import journal from "../../../drizzle/migrations/meta/_journal.json";
 import bundle from "./bundle.json";
+import { orderMigrationNames } from "./order";
 import type { BundledMigration, MigrationNameRow, MigrationResult, MigrationStatus } from "./types";
 
 const MIGRATION_TABLE_SQL =
 	"CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)";
 
-const migrations = bundle.migrations as BundledMigration[];
+const bundled = bundle.migrations as BundledMigration[];
+const migrations = orderMigrationNames(
+	bundled.map((migration) => migration.name),
+	journal.entries.map((entry) => entry.tag),
+).map((name) => {
+	const migration = bundled.find((candidate) => candidate.name === name);
+	if (!migration) throw new Error(`Migration ${name} is missing from the bundle`);
+	return migration;
+});
 
 async function getAppliedMigrationNames(db: D1Database): Promise<string[]> {
 	const table = await db

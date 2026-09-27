@@ -231,14 +231,20 @@ export async function ensureDemoUser(env: CloudflareEnv) {
 		.from(users)
 		.where(eq(users.email, demoCredentials.email))
 		.limit(1);
-	if (existing) return existing;
+	if (existing) {
+		if (existing.role === "admin") return existing;
+		await db.update(users).set({ role: "admin" }).where(eq(users.id, existing.id));
+		const [promoted] = await db.select().from(users).where(eq(users.id, existing.id)).limit(1);
+		return promoted!;
+	}
 
 	const id = newId("usr");
 	await db.insert(users).values({
 		id,
 		email: demoCredentials.email,
 		passwordHash: hashPassword(demoCredentials.password),
-		name: "Demo User",
+		name: "Admin",
+		role: "admin",
 	});
 
 	const [created] = await db.select().from(users).where(eq(users.id, id)).limit(1);

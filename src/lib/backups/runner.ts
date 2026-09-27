@@ -14,7 +14,9 @@ export async function runDatabaseBackup(env: CloudflareEnv, backupId: string): P
 			.where(eq(backups.id, backupId));
 
 		const settings = await getBackupSettings(env);
-		const content = await exportDatabaseRecords(env.DB, settings?.excludedTableGroups ?? []);
+		const content = await exportDatabaseRecords(env.DB, settings?.excludedTableGroups ?? [], {
+			includeMessageBodies: false,
+		});
 		const filename = createBackupFilename(new Date());
 		const r2Key = `${BACKUP_PREFIX}/${backupId}/${filename}`;
 		const object = await env.BUCKET.put(r2Key, content, {

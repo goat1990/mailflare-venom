@@ -35,7 +35,25 @@ export function parsePaymugLicenseResponse(value: unknown): PaymugLicenseRespons
 		features: Array.isArray(response.features)
 			? response.features.filter((feature): feature is string => typeof feature === "string")
 			: undefined,
+		endsAt: parseLicenseEndsAt(value),
 	};
+}
+
+/** Paymug's period end, when the payload includes one. Missing or unparseable values do not invent an expiry. */
+export function parseLicenseEndsAt(value: unknown): Date | null {
+	if (!value || typeof value !== "object") return null;
+	const record = value as Record<string, unknown>;
+	const raw = record.endsAt ?? record.expiresAt ?? record.validUntil ?? record.ends_at ?? record.expires_at;
+	if (typeof raw === "number" && Number.isFinite(raw)) {
+		const ms = raw < 1_000_000_000_000 ? raw * 1000 : raw;
+		const date = new Date(ms);
+		return Number.isNaN(date.getTime()) ? null : date;
+	}
+	if (typeof raw === "string" && raw.trim()) {
+		const date = new Date(raw);
+		return Number.isNaN(date.getTime()) ? null : date;
+	}
+	return null;
 }
 
 export function normalizeLicensePlan(productId: string | undefined, plan: string | undefined): LicensePlan | null {

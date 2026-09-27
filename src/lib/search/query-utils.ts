@@ -1,4 +1,4 @@
-import type { ParsedSearchQuery, SearchToken } from "./types";
+import type { FtsMatch, ParsedSearchQuery, SearchToken } from "./types";
 
 /**
  * Gmail-style search grammar shared by the search box and the API:
@@ -10,42 +10,26 @@ import type { ParsedSearchQuery, SearchToken } from "./types";
  */
 const OPERATOR_RE = /(?:^|\s)(from|to|subject|title|has|is|after|before|newer|older):(?:"([^"]*)"|(\S+))/gi;
 
+type SearchOperator = "from" | "to" | "subject" | "title" | "has" | "is" | "after" | "before" | "newer" | "older";
+
 export function parseSearchQuery(raw: string): ParsedSearchQuery {
 	const parsed: ParsedSearchQuery = { text: "", needsFullText: false };
 	let rest = raw ?? "";
 
 	rest = rest.replace(OPERATOR_RE, (_match, key: string, quoted: string | undefined, bare: string | undefined) => {
 		const value = (quoted ?? bare ?? "").trim();
-		switch (key.toLowerCase()) {
-			case "from":
-				parsed.from = value;
-				break;
-			case "to":
-				parsed.to = value;
-				break;
-			case "subject":
-			case "title":
-				parsed.subject = value;
-				break;
-			case "has":
-				if (/^attachments?$/i.test(value)) parsed.hasAttachment = true;
-				break;
-			case "is":
-				if (/^unread$/i.test(value)) parsed.read = "unread";
-				else if (/^read$/i.test(value)) parsed.read = "read";
-				else if (/^starred$/i.test(value)) parsed.starred = true;
-				break;
-			case "after":
-			case "newer":
-				parsed.after = parseDate(value) ?? parsed.after;
-				break;
-			case "before":
-			case "older":
-				parsed.before = parseDate(value) ?? parsed.before;
-				break;
+		if (!applyOperator(parsed, key.toLowerCase() as SearchOperator, value)) {
+			noteSearchError(parsed, `Unknown search operator "${key.toLowerCase()}:${value}"`);
 		}
 		return " ";
 	});
+
+	const unquoted = rest.replace(/"[^"]*"/g, " ");
+	for (const match of unquoted.matchAll(/(?:^|\s)([A-Za-z][A-Za-z0-9_-]*):(?:"([^"]*)"|(\S+))/g)) {
+		const value = match[2] ?? match[3] ?? "";
+		if (value.startsWith("/")) continue;
+		noteSearchError(parsed, `Unknown search operator "${match[1].toLowerCase()}"`);
+	}
 
 	if (/(^|\s):unread(?=\s|$)/i.test(rest)) {
 		parsed.read = "unread";
@@ -58,6 +42,56 @@ export function parseSearchQuery(raw: string): ParsedSearchQuery {
 	parsed.text = rest.replace(/\s+/g, " ").trim();
 	parsed.needsFullText = !!(parsed.text || parsed.from || parsed.to || parsed.subject);
 	return parsed;
+}
+
+function noteSearchError(parsed: ParsedSearchQuery, message: string): void {
+	if (!parsed.error) parsed.error = message;
+}
+
+function applyOperator(parsed: ParsedSearchQuery, key: SearchOperator, value: string): boolean {
+	switch (key) {
+		case "from":
+			if (!value) return false;
+			parsed.from = value;
+			return true;
+		case "to":
+			if (!value) return false;
+			parsed.to = value;
+			return true;
+		case "subject":
+		case "title":
+			if (!value) return false;
+			parsed.subject = value;
+			return true;
+		case "has":
+			if (!/^attachments?$/i.test(value)) return false;
+			parsed.hasAttachment = true;
+			return true;
+		case "is":
+			if (/^unread$/i.test(value)) parsed.read = "unread";
+			else if (/^read$/i.test(value)) parsed.read = "read";
+			else if (/^starred$/i.test(value)) parsed.starred = true;
+			else return false;
+			return true;
+		case "after":
+		case "newer": {
+			const after = parseDate(value);
+			if (!after) return false;
+			parsed.after = after;
+			return true;
+		}
+		case "before":
+		case "older": {
+			const before = parseDate(value);
+			if (!before) return false;
+			parsed.before = before;
+			return true;
+		}
+		default: {
+			const unreachable: never = key;
+			return unreachable;
+		}
+	}
 }
 
 function parseDate(value: string): Date | undefined {
@@ -110,7 +144,7 @@ function ftsTerm(term: string, phrase: boolean): string {
  * column; free text is ANDed across the whole row. Returns null when there is
  * nothing to match, so callers skip the index entirely.
  */
-export function buildFtsMatch(parsed: ParsedSearchQuery): string | null {
+export function buildFtsMatch(parsed: ParsedSearchQuery): FtsMatch | null {
 	const parts: string[] = [];
 
 	for (const token of tokenizeSearchText(parsed.text)) {
@@ -131,10 +165,14 @@ export function buildFtsMatch(parsed: ParsedSearchQuery): string | null {
 	column("{to_addr cc_addr}", parsed.to);
 
 	if (parts.length === 0) return null;
-	// FTS5 has no unary NOT: "a NOT b" is binary. A leading negation is turned
-	// into "match anything" minus the term.
+	// FTS5 has no unary NOT, and a leading `""*` matches nothing. A query that
+	// only excludes has to be applied as "row NOT IN (MATCH term)" by the caller.
 	const positives = parts.filter((part) => !part.startsWith("NOT "));
 	const negatives = parts.filter((part) => part.startsWith("NOT ")).map((part) => part.slice(4));
-	const base = positives.length > 0 ? positives.join(" AND ") : `${ftsString("")}*`;
-	return negatives.length > 0 ? `(${base}) NOT (${negatives.join(" OR ")})` : base;
+	if (positives.length === 0) {
+		return negatives.length > 0 ? { mode: "exclude", expression: negatives.join(" OR ") } : null;
+	}
+	const base = positives.join(" AND ");
+	const expression = negatives.length > 0 ? `(${base}) NOT (${negatives.join(" OR ")})` : base;
+	return { mode: "match", expression };
 }

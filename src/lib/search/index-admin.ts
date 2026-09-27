@@ -1,4 +1,11 @@
 /**
+ * Columns covered by `messages_fts`. `bcc_addr` is included. `html_body` is the
+ * message HTML with tags removed (`messages_search_source`); a rebuild reads
+ * that view, so it does not put markup back into the index.
+ */
+export const SEARCH_INDEX_COLUMNS = ["subject", "from_addr", "to_addr", "cc_addr", "bcc_addr", "text_body", "html_body"] as const;
+
+/**
  * Maintenance for the FTS5 index. Triggers keep it current, so a rebuild is
  * only needed after a restore from a backup that predates the index, or if the
  * counts below ever disagree.
