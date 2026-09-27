@@ -39,7 +39,17 @@ function toLicenseStatus(settings: typeof licenseSettings.$inferSelect): License
 }
 
 export async function getLicenseStatus(env: CloudflareEnv): Promise<LicenseStatus> {
-	return toLicenseStatus(await getOrCreateLicenseSettings(env));
+	const settings = await getOrCreateLicenseSettings(env);
+	const endsAt = await readLicenseEndsAt(env);
+	if (settings.state === "active" && endsAt && endsAt.getTime() <= Date.now()) {
+		const now = new Date();
+		await getDb(env)
+			.update(licenseSettings)
+			.set({ state: "expired", updatedAt: now })
+			.where(eq(licenseSettings.id, LICENSE_SETTINGS_ID));
+		return toLicenseStatus({ ...settings, state: "expired" });
+	}
+	return toLicenseStatus(settings);
 }
 
 export async function getLicenseEntitlements(env: CloudflareEnv): Promise<LicenseEntitlements> {
@@ -106,6 +116,7 @@ async function updateLicenseFromPaymug(
 				updatedAt: now,
 			})
 			.where(eq(licenseSettings.id, LICENSE_SETTINGS_ID));
+		await writeLicenseEndsAt(env, null);
 		return getLicenseStatus(env);
 	}
 
@@ -136,9 +147,31 @@ async function updateLicenseFromPaymug(
 			validatedAt: now,
 			updatedAt: now,
 		})
-		.where(eq(licenseSettings.id, LICENSE_SETTINGS_ID));
+			.where(eq(licenseSettings.id, LICENSE_SETTINGS_ID));
+	if (result.endsAt) await writeLicenseEndsAt(env, result.endsAt);
 
 	return getLicenseStatus(env);
+}
+
+async function licenseHasEndsAt(env: CloudflareEnv): Promise<boolean> {
+	const columns = await env.DB.prepare("PRAGMA table_info(license_settings)").all<{ name: string }>();
+	return (columns.results ?? []).some((column) => column.name === "ends_at");
+}
+
+async function readLicenseEndsAt(env: CloudflareEnv): Promise<Date | null> {
+	if (!(await licenseHasEndsAt(env))) return null;
+	const row = await env.DB.prepare("SELECT ends_at FROM license_settings WHERE id = ?")
+		.bind(LICENSE_SETTINGS_ID)
+		.first<{ ends_at: number | null }>();
+	if (row?.ends_at == null) return null;
+	return new Date(row.ends_at);
+}
+
+async function writeLicenseEndsAt(env: CloudflareEnv, endsAt: Date | null): Promise<void> {
+	if (!(await licenseHasEndsAt(env))) return;
+	await env.DB.prepare("UPDATE license_settings SET ends_at = ? WHERE id = ?")
+		.bind(endsAt ? endsAt.getTime() : null, LICENSE_SETTINGS_ID)
+		.run();
 }
 
 export function activateLicense(

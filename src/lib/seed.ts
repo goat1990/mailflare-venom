@@ -13,7 +13,7 @@ export async function seedDemoData(env: CloudflareEnv): Promise<{ messageCount: 
 	const mailboxMap = await ensureDemoMailboxes(env, user.id, domain.id);
 	const messageCount = await insertDemoMessages(env, user.id, mailboxMap);
 
-	console.info("Seeded demo user:", demoCredentials);
+	console.info("Seeded admin user:", demoCredentials);
 
 	return { messageCount };
 }

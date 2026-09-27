@@ -1,5 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { orderMigrationNames } from "../../src/lib/migrations/order";
 import type { SqliteDatabase } from "./sqlite-database";
 
 /**
@@ -16,16 +17,15 @@ export async function applyMigrations(database: SqliteDatabase, migrationsDir: s
 	);
 	const applied = new Set(db.prepare("SELECT name FROM d1_migrations").all().map((row) => (row as { name: string }).name));
 
-	let order: string[];
+	let journalTags: string[] = [];
 	try {
 		const journal = JSON.parse(await readFile(join(migrationsDir, "meta", "_journal.json"), "utf8")) as { entries: Array<{ tag: string }> };
-		order = journal.entries.map((entry) => `${entry.tag}.sql`);
+		journalTags = journal.entries.map((entry) => entry.tag);
 	} catch {
-		order = [];
+		journalTags = [];
 	}
-	const files = (await readdir(migrationsDir)).filter((name) => name.endsWith(".sql")).sort();
-	// Anything the journal does not list (hand-written migrations) runs after it, in name order.
-	const names = [...order.filter((name) => files.includes(name)), ...files.filter((name) => !order.includes(name))];
+	const files = (await readdir(migrationsDir)).filter((name) => name.endsWith(".sql"));
+	const names = orderMigrationNames(files, journalTags);
 
 	const ran: string[] = [];
 	for (const name of names) {

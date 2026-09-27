@@ -10,11 +10,14 @@ import { buildFtsMatch, parseSearchQuery } from "./query-utils";
  */
 export function buildSearchConditions(raw: string): SQL[] {
 	const parsed = parseSearchQuery(raw);
+	if (parsed.error) throw new Error(parsed.error);
 	const conditions: SQL[] = [];
 
 	const match = buildFtsMatch(parsed);
-	if (match) {
-		conditions.push(sql`${messages}.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ${match})`);
+	if (match?.mode === "match") {
+		conditions.push(sql`${messages}.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ${match.expression})`);
+	} else if (match?.mode === "exclude") {
+		conditions.push(sql`${messages}.rowid NOT IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ${match.expression})`);
 	}
 	if (parsed.hasAttachment) {
 		conditions.push(
