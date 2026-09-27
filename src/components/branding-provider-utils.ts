@@ -1,7 +1,7 @@
 import type { Branding } from "@/lib/branding/types";
 
 export const DEFAULT_BRANDING: Branding = {
-	appName: "Mailflare",
+	appName: "Venommail",
 	hasCustomIcon: false,
 	canCustomizeBranding: false,
 };

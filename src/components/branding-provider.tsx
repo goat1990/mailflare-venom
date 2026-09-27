@@ -14,7 +14,7 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
 		const nextBranding = await fetchBranding();
 		setBranding(nextBranding);
 		setIconVersion(Date.now());
-		if (document.title === "Mailflare" || document.title === branding.appName) {
+		if (document.title === "Venommail" || document.title === branding.appName) {
 			document.title = nextBranding.appName;
 		}
 	}

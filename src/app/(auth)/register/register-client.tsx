@@ -242,7 +242,7 @@ export function RegisterClient() {
       {step === 1 ? (
         <div className="space-y-5">
           <p className="text-sm leading-6 text-neutral-600">
-            Mailflare checks its required Cloudflare configuration and initializes a clean D1 database before setup continues.
+            Venommail checks its required Cloudflare configuration and initializes a clean D1 database before setup continues.
           </p>
           <div className="space-y-2">
             {loading && checks.length === 0 && (

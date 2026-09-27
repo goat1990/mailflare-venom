@@ -32,7 +32,7 @@ export default function BrandingPage() {
 				<Card className="rounded-3xl border-0 bg-white p-6">
 					<CardHeader className="py-0">
 						<CardTitle className="flex items-center gap-2"><LockKeyhole className="h-5 w-5" />License required</CardTitle>
-						<CardDescription>This installation continues to use the original Mailflare name, app icon, and favicon.</CardDescription>
+						<CardDescription>This installation continues to use the original Venommail name, app icon, and favicon.</CardDescription>
 					</CardHeader>
 					<CardContent className="flex flex-col gap-3 pt-6 sm:flex-row">
 						<Button asChild><a href="https://app.paymug.co/buy/mailflare-pro" target="_blank" rel="noopener noreferrer">Buy Pro · $29 <ExternalLink className="h-4 w-4" /></a></Button>

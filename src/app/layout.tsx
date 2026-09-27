@@ -15,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-	title: "Mailflare",
+	title: "Venommail",
 	description: "Multi-tenant email on Cloudflare",
-	icons: { icon: "/api/branding/icon" },
+	icons: { icon: "/icon-96.png" },
 	robots: {
 		index: false,
 		follow: false,
@@ -39,7 +39,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
 		<html lang="en">
 			<head>
 				<script dangerouslySetInnerHTML={{ __html: sidebarBootstrapScript }} />
-				<link rel="icon" href="/api/branding/icon"></link>
+				<link rel="icon" href="/icon-96.png" type="image/png"></link>
 			</head>
 			<body className={`${geistSans.variable} ${geistMono.variable} antialiased light`}>
 				<Providers>{children}</Providers>
