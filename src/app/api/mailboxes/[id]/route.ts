@@ -10,7 +10,7 @@ import { isPrimaryMailbox, tracksAccountIdentity } from "@/lib/profile/identity-
 import { syncPersonalIdentity } from "@/lib/profile/sync";
 import { updateMailboxSchema } from "@/lib/validators";
 import type { MailboxRouteParams } from "./types";
-import { getMailboxUpdateValues, selectMailboxForUser } from "./utils";
+import { getMailboxUpdateValues, removeOtherDomainRouting, selectMailboxForUser } from "./utils";
 
 export async function GET(request: Request, { params }: MailboxRouteParams) {
 	const { id } = await params;
@@ -85,6 +85,17 @@ export async function PATCH(request: Request, { params }: MailboxRouteParams) {
 			console.error("ensureMailboxDomainRouting", error);
 			return NextResponse.json(
 				{ error: "Failed to configure inbound routing for all domains. Please try saving again." },
+				{ status: 502 },
+			);
+		}
+	}
+	if (parsed.data.useAllDomains === false && existing.useAllDomains) {
+		try {
+			await removeOtherDomainRouting(env, db, existing);
+		} catch (error) {
+			console.error("removeOtherDomainRouting", error);
+			return NextResponse.json(
+				{ error: "Failed to remove inbound routing for the other domains. Please try saving again." },
 				{ status: 502 },
 			);
 		}

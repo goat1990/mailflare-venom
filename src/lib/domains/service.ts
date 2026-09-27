@@ -1,12 +1,14 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { getDb } from "@/db";
 import { domains, mailboxes } from "@/db/schema";
 import { ensureMailboxDomainRouting } from "@/lib/mailboxes/domain-addresses";
 import { newId } from "@/lib/ids";
+import { isZoneApex } from "@/lib/domains/utils";
 import {
 	disableEmailRouting,
 	getEmailRoutingDns,
 	getEmailRoutingSettings,
+	getZone,
 	getSendingSubdomainDns,
 	deleteSendingSubdomain,
 	listSendingSubdomains,
@@ -183,9 +185,9 @@ export async function removeDomainForUser(
 		console.warn("deleteEmailRoutingRulesForDomain", err);
 	}
 
-	if (domain.routingEnabled) {
+	if (domain.routingEnabled && !isManualZone(domain.zoneId)) {
 		try {
-			await disableEmailRouting(env, domain.zoneId);
+			await disableDomainEmailRouting(env, domain);
 		} catch (err) {
 			console.warn("disableEmailRouting", err);
 		}
@@ -200,6 +202,24 @@ export async function removeDomainForUser(
 	}
 
 	await db.delete(domains).where(eq(domains.id, domainId));
+}
+
+/**
+ * A subdomain turns off its own routing. The apex holds routing for the whole zone, so it keeps
+ * it while another domain in the same zone still receives mail.
+ */
+async function disableDomainEmailRouting(env: CloudflareEnv, domain: typeof domains.$inferSelect): Promise<void> {
+	const zone = await getZone(env, domain.zoneId);
+	if (!isZoneApex(domain.hostname, zone.name)) {
+		await disableEmailRouting(env, domain.zoneId, domain.hostname);
+		return;
+	}
+	const [sibling] = await getDb(env)
+		.select({ id: domains.id })
+		.from(domains)
+		.where(and(eq(domains.zoneId, domain.zoneId), ne(domains.id, domain.id)))
+		.limit(1);
+	if (!sibling) await disableEmailRouting(env, domain.zoneId);
 }
 
 export async function getDomainForUser(env: CloudflareEnv, userId: string, domainId: string) {

@@ -1,9 +1,31 @@
 import { eq } from "drizzle-orm";
 import { domains, mailboxes, users } from "@/db/schema";
 import type { getDb } from "@/db";
+import { deleteEmailRoutingRuleForAddress } from "@/lib/cloudflare-api";
+import { getMailboxDomainAddresses } from "@/lib/mailboxes/domain-addresses";
 import type { MailboxUpdateValues } from "./types";
 
 type Db = ReturnType<typeof getDb>;
+
+/** Deletes the Cloudflare rules for addresses a mailbox answers only while it uses every domain. */
+export async function removeOtherDomainRouting(
+	env: CloudflareEnv,
+	db: Db,
+	mailbox: { id: string; domainId: string; localPart: string },
+): Promise<void> {
+	const everyDomain = await getMailboxDomainAddresses(db, { ...mailbox, useAllDomains: true });
+	const ownDomain = new Set(await getMailboxDomainAddresses(db, { ...mailbox, useAllDomains: false }));
+	const dropped = everyDomain.filter((address) => !ownDomain.has(address));
+	if (dropped.length === 0) return;
+	const zones = await db.select({ hostname: domains.hostname, zoneId: domains.zoneId }).from(domains);
+	const zoneByHostname = new Map(zones.map((zone) => [zone.hostname.toLowerCase(), zone.zoneId]));
+	await Promise.all(
+		dropped.map(async (address) => {
+			const zoneId = zoneByHostname.get(address.slice(address.lastIndexOf("@") + 1));
+			if (zoneId) await deleteEmailRoutingRuleForAddress(env, zoneId, address);
+		}),
+	);
+}
 
 export function selectMailboxForUser(db: Db, userId: string, mailboxId: string) {
 	return db
