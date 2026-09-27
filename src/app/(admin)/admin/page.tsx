@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BadgeDollarSign, Bot, Globe2, KeyRound, Mail, Palette, Settings, Users, Webhook } from "lucide-react";
+import { Activity, BadgeDollarSign, Bot, DatabaseBackup, Globe2, KeyRound, Mail, Palette, Route, Settings, Users } from "lucide-react";
 import { AdminUpdateCard } from "@/components/admin-update-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -45,6 +45,24 @@ const sections = [
 		title: "Admin API keys",
 		description: "Manage API access to domains, accounts, and mailboxes.",
 		icon: KeyRound,
+	},
+	{
+		href: "/routing",
+		title: "Routing",
+		description: "Configure domain-wide delivery, forwarding, and blocking rules.",
+		icon: Route,
+	},
+	{
+		href: "/activity",
+		title: "Activity",
+		description: "Review login and logout activity.",
+		icon: Activity,
+	},
+	{
+		href: "/backups",
+		title: "Backups",
+		description: "Export and restore mailbox data.",
+		icon: DatabaseBackup,
 	},
 	// {
 	// 	href: "/webhooks",

@@ -63,43 +63,62 @@ export function MessageSplitLayout({
 
 	useEffect(() => () => setForcedMinimal(false), [setForcedMinimal]);
 
-	if (!selectedMessageId) return children;
+	const showDetail = Boolean(selectedMessageId);
 
 	return (
-		<div ref={containerRef} className="h-full min-h-0 overflow-hidden lg:grid lg:transition-[grid-template-columns] lg:ease-in-out motion-reduce:transition-none" style={{ gridTemplateColumns: `${listVisible ? renderedListWidth : 0}px minmax(0,1fr)`, transitionDuration: widthReady ? "300ms" : "0ms" }}>
-			<aside className={`relative hidden min-h-0 min-w-0 overflow-hidden bg-white lg:block ${listVisible ? "border-r border-neutral-200" : "pointer-events-none"}`} aria-hidden={!listVisible} inert={!listVisible}>
-				<div className={`h-full overflow-hidden transition-transform duration-300 ease-in-out motion-reduce:transition-none ${listVisible ? "translate-x-0" : "-translate-x-full"}`} style={{ width: renderedListWidth }}>
-				<MessageFolderPage
-					config={config}
-					compact
-					selectedMessageId={selectedMessageId}
-					selection={{ selectedMessages, setSelectedMessages }}
-				/>
-				</div>
-				<ResizeHandle
-					label="Resize message list"
-					onResizeStart={() => { startWidth.current = listWidth; resizedWidth.current = listWidth; }}
-					onResize={(delta) => {
-						const requestedWidth = startWidth.current + delta;
-						setForcedMinimal(requestedWidth < 250);
-						resizedWidth.current = Math.max(250, Math.min(requestedWidth, Math.max(250, (containerRef.current?.clientWidth ?? 1000) - 280)));
-						setListWidth(resizedWidth.current);
-					}}
-					onResizeEnd={() => saveColumnWidth(userId, "message-list", resizedWidth.current)}
-				/>
-			</aside>
-			<MessageListVisibilityContext.Provider value={{ visible: listVisible, toggle: () => { const visible = !manualListVisible; setManualListVisible(visible); saveMessageListVisible(visible); } }}>
-			<section className="min-h-0 min-w-0 overflow-hidden bg-white">
-				{selectedMessages.length > 0 ? (
-					<BulkMessageSelectionPane
-						selectedMessages={selectedMessages}
-						onClearSelection={() => setSelectedMessages([])}
+		<div
+			ref={containerRef}
+			className={`h-full min-h-0 overflow-hidden ${showDetail ? "lg:grid lg:transition-[grid-template-columns] lg:ease-in-out motion-reduce:transition-none" : ""}`}
+			style={showDetail ? { gridTemplateColumns: `${listVisible ? renderedListWidth : 0}px minmax(0,1fr)`, transitionDuration: widthReady ? "300ms" : "0ms" } : undefined}
+		>
+			<aside
+				className={showDetail
+					? `relative hidden min-h-0 min-w-0 overflow-hidden bg-white lg:block ${listVisible ? "border-r border-neutral-200" : "pointer-events-none"}`
+					: "h-full min-h-0 min-w-0 overflow-hidden bg-white"}
+				aria-hidden={showDetail ? !listVisible : undefined}
+				inert={showDetail ? !listVisible : undefined}
+			>
+				<div
+					className={showDetail
+						? `h-full overflow-hidden transition-transform duration-300 ease-in-out motion-reduce:transition-none ${listVisible ? "translate-x-0" : "-translate-x-full"}`
+						: "h-full overflow-hidden"}
+					style={showDetail ? { width: renderedListWidth } : undefined}
+				>
+					<MessageFolderPage
+						config={config}
+						compact={showDetail}
+						selectedMessageId={selectedMessageId}
+						selection={{ selectedMessages, setSelectedMessages }}
 					/>
-				) : (
-					children
+				</div>
+				{showDetail && (
+					<ResizeHandle
+						label="Resize message list"
+						onResizeStart={() => { startWidth.current = listWidth; resizedWidth.current = listWidth; }}
+						onResize={(delta) => {
+							const requestedWidth = startWidth.current + delta;
+							setForcedMinimal(requestedWidth < 250);
+							resizedWidth.current = Math.max(250, Math.min(requestedWidth, Math.max(250, (containerRef.current?.clientWidth ?? 1000) - 280)));
+							setListWidth(resizedWidth.current);
+						}}
+						onResizeEnd={() => saveColumnWidth(userId, "message-list", resizedWidth.current)}
+					/>
 				)}
-			</section>
-			</MessageListVisibilityContext.Provider>
+			</aside>
+			{showDetail && (
+				<MessageListVisibilityContext.Provider value={{ visible: listVisible, toggle: () => { const visible = !manualListVisible; setManualListVisible(visible); saveMessageListVisible(visible); } }}>
+					<section className="min-h-0 min-w-0 overflow-hidden bg-white">
+						{selectedMessages.length > 0 ? (
+							<BulkMessageSelectionPane
+								selectedMessages={selectedMessages}
+								onClearSelection={() => setSelectedMessages([])}
+							/>
+						) : (
+							children
+						)}
+					</section>
+				</MessageListVisibilityContext.Provider>
+			)}
 		</div>
 	);
 }

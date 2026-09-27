@@ -16,6 +16,20 @@ import {
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { RichTextEditorProps, ToolbarCommand } from "./rich-text-editor-types";
+import { applySanitizedHtml, sanitizeComposerHtml } from "./rich-text-utils";
+
+function QuotedDraftHtml({ html }: { html: string }) {
+	const ref = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		if (ref.current) applySanitizedHtml(ref.current, html);
+	}, [html]);
+	return (
+		<div
+			ref={ref}
+			className="email-body mt-2 max-w-none border-l-2 border-neutral-200 pl-3 text-sm text-neutral-600"
+		/>
+	);
+}
 
 const COMMANDS: ToolbarCommand[] = [
 	{ command: "bold", label: "Bold (⌘B)", icon: Bold },
@@ -52,9 +66,13 @@ export function RichTextEditor({
 	const savedRange = useRef<Range | null>(null);
 
 	// Keep the DOM in step with the value without resetting the caret on every keystroke.
+	// Draft HTML is sanitized and inserted as nodes so a script in the draft cannot run.
 	useEffect(() => {
 		const element = editorRef.current;
-		if (element && element.innerHTML !== value) element.innerHTML = value;
+		if (!element) return;
+		const safe = sanitizeComposerHtml(value);
+		if (sanitizeComposerHtml(element.innerHTML) === safe) return;
+		applySanitizedHtml(element, safe);
 	}, [value]);
 
 	useEffect(() => {
@@ -107,8 +125,11 @@ export function RichTextEditor({
 			selection.removeAllRanges();
 			selection.addRange(savedRange.current);
 		}
-		if (selection && selection.isCollapsed) {
-			document.execCommand("insertHTML", false, `<a href="${href.replace(/"/g, "&quot;")}">${href}</a>`);
+		if (selection && selection.isCollapsed && selection.rangeCount > 0) {
+			const anchor = document.createElement("a");
+			anchor.href = href;
+			anchor.textContent = href;
+			selection.getRangeAt(0).insertNode(anchor);
 		} else {
 			document.execCommand("createLink", false, href);
 		}
@@ -162,10 +183,7 @@ export function RichTextEditor({
 							•••
 						</button>
 						{showQuoted && (
-							<div
-								className="email-body mt-2 max-w-none border-l-2 border-neutral-200 pl-3 text-sm text-neutral-600"
-								dangerouslySetInnerHTML={{ __html: quotedHtml }}
-							/>
+							<QuotedDraftHtml html={quotedHtml} />
 						)}
 					</div>
 				)}

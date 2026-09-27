@@ -60,7 +60,10 @@ export type BulkMessageToolbarProps = {
 	pending: boolean;
 };
 
-export type SelectedMessage = Pick<Message, "id" | "read">;
+export type SelectedMessage = Pick<Message, "id" | "read"> & {
+	/** Every message this row stands for. A conversation row is more than its newest id. */
+	messageIds: string[];
+};
 
 export type MessageSelectionControl = {
 	selectedMessages: SelectedMessage[];

@@ -1,4 +1,5 @@
 import type { NewMessageEvent } from "./message-realtime-types";
+import { realtimeFallbackOn as realtimeFallbackOnImpl } from "./realtime-fallback.mjs";
 
 export const REALTIME_FALLBACK_INTERVAL_MS = 60_000;
 export const REALTIME_HEARTBEAT_INTERVAL_MS = 25_000;
@@ -24,6 +25,14 @@ export function getRealtimeWebSocketUrl(): string {
 
 export function getReconnectDelay(attempt: number): number {
 	return Math.min(1_000 * 2 ** attempt, REALTIME_RECONNECT_MAX_MS);
+}
+
+/**
+ * Fallback polling runs whenever the socket is not open, including during
+ * reconnects. Opening the socket is the only event that stops it.
+ */
+export function realtimeFallbackOn(event: "start" | "reconnect" | "open" | "close"): boolean {
+	return realtimeFallbackOnImpl(event);
 }
 
 export function parseNewMessageEvent(value: string): NewMessageEvent | null {

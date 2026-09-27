@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 type ComposeContextValue = {
@@ -22,26 +22,25 @@ export function useCompose() {
 export function ComposeProvider({ children }: { children: ReactNode }) {
 	const [open, setOpen] = useState(false);
 	const [draftId, setDraftId] = useState<string | null>(null);
+	const openComposer = useCallback(() => {
+		setDraftId(null);
+		setOpen(true);
+	}, []);
+	const openDraftComposer = useCallback((nextDraftId: string) => {
+		setDraftId(nextDraftId);
+		setOpen(true);
+	}, []);
+	const closeComposer = useCallback(() => {
+		setOpen(false);
+		setDraftId(null);
+	}, []);
+	const value = useMemo(
+		() => ({ open, draftId, openComposer, openDraftComposer, closeComposer }),
+		[closeComposer, draftId, open, openComposer, openDraftComposer],
+	);
 
 	return (
-		<ComposeContext.Provider
-			value={{
-				open,
-				draftId,
-				openComposer: () => {
-					setDraftId(null);
-					setOpen(true);
-				},
-				openDraftComposer: (nextDraftId) => {
-					setDraftId(nextDraftId);
-					setOpen(true);
-				},
-				closeComposer: () => {
-					setOpen(false);
-					setDraftId(null);
-				},
-			}}
-		>
+		<ComposeContext.Provider value={value}>
 			{children}
 		</ComposeContext.Provider>
 	);

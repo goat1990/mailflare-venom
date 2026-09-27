@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { BulkMessageAction } from "@/app/api/messages/bulk/types";
 import { BulkMessageToolbar } from "./bulk-message-toolbar";
 import type { BulkMessageSelectionPaneProps } from "./types";
+import { threadActionIds } from "./thread-selection";
 import { runBulkMessageAction } from "./utils";
 
 export function BulkMessageSelectionPane({
@@ -19,10 +20,7 @@ export function BulkMessageSelectionPane({
 
 		setPending(true);
 		try {
-			await runBulkMessageAction(
-				selectedMessages.map((message) => message.id),
-				action,
-			);
+			await runBulkMessageAction(threadActionIds(selectedMessages), action);
 			onClearSelection();
 		} finally {
 			setPending(false);

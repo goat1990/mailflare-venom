@@ -54,7 +54,14 @@ export default function ActivityPage() {
                   </td>
                 </tr>
               ))}
-            {!activity.isLoading && (activity.data ?? []).length === 0 && (
+            {activity.isError && (
+              <tr>
+                <td colSpan={4} role="alert" className="px-5 py-4 text-sm text-red-600">
+                  {activity.error instanceof Error ? activity.error.message : "Could not load activity"}
+                </td>
+              </tr>
+            )}
+            {!activity.isLoading && !activity.isError && (activity.data ?? []).length === 0 && (
               <tr>
                 <td colSpan={4} className="px-5 py-4 text-sm text-neutral-500">
                   No login or logout activity yet

@@ -16,6 +16,7 @@ import type { BulkMessageAction } from "@/app/api/messages/bulk/types";
 import type { Message } from "@/hooks/types";
 import { setMessageDragData } from "@/lib/messages/drag-utils";
 import { BulkMessageToolbar } from "./bulk-message-toolbar";
+import { threadActionIds } from "./thread-selection";
 import { MessageListRowActions } from "./message-list-row-actions";
 import { dispatchMessageCountsDelta, toggleMessageStar } from "./message-list-row-actions-utils";
 import { MessageNavigationProgress, useMessageNavigation } from "./message-navigation";
@@ -250,7 +251,7 @@ export function MessageFolderPage({
 	const [unreadOnly, setUnreadOnly] = useState(false);
 	const [conversationView] = useConversationView();
 	const grouped = conversationView && config.folder !== "drafts";
-	const { messages, isLoading, total, limit, updateMessages } = useMessages(config.folder, selectedMailbox?.id, {
+	const { messages, isLoading, error, total, limit, updateMessages } = useMessages(config.folder, selectedMailbox?.id, {
 		query,
 		limit: pageSize,
 		offset,
@@ -281,8 +282,16 @@ export function MessageFolderPage({
 	// In conversation view a row stands for every message of its thread in this
 	// folder, so actions and drags carry all of them.
 	const rowMessageIds = (message: Message) => message.threadMessageIds ?? [message.id];
+	const toSelection = (message: Message) => ({
+		id: message.id,
+		read: message.read && !(message.threadUnread ?? 0),
+		messageIds: rowMessageIds(message),
+	});
 	const expandSelectedIds = (ids: string[]) =>
-		ids.flatMap((id) => rowMessageIds(messages.find((message) => message.id === id) ?? { id } as Message));
+		threadActionIds(ids.map((id) => {
+			const message = messages.find((item) => item.id === id);
+			return message ? toSelection(message) : { id, messageIds: [id] };
+		}));
 
 	useEffect(() => {
 		setOffset(0);
@@ -310,7 +319,7 @@ export function MessageFolderPage({
 		setSelectedMessages((current) => {
 			if (!selected) return current.filter((item) => item.id !== messageId);
 			if (current.some((item) => item.id === messageId)) return current;
-			return [...current, { id: message.id, read: message.read && !(message.threadUnread ?? 0) }];
+			return [...current, toSelection(message)];
 		});
 	}
 
@@ -323,7 +332,7 @@ export function MessageFolderPage({
 
 			const next = new Map(current.map((message) => [message.id, message]));
 			for (const message of messages) {
-				next.set(message.id, { id: message.id, read: message.read && !(message.threadUnread ?? 0) });
+				next.set(message.id, toSelection(message));
 			}
 			return Array.from(next.values());
 		});
@@ -447,6 +456,11 @@ export function MessageFolderPage({
 			</div>
 
 			<div className="min-h-0 flex-1 divide-y divide-neutral-100 overflow-y-auto overscroll-contain scrollbar-gutter-stable">
+				{error && (
+					<p role="alert" className="px-6 py-4 text-sm text-red-600">
+						{error}
+					</p>
+				)}
 				{messages.map((message) => (
 					<MessageListRow
 						key={message.id}
@@ -463,7 +477,7 @@ export function MessageFolderPage({
 						dragMessageIds={expandSelectedIds(selectedIds.includes(message.id) ? selectedIds : [message.id])}
 					/>
 				))}
-				{!isLoading && messages.length === 0 && (
+				{!isLoading && !error && messages.length === 0 && (
 					<p className="px-6 py-4 text-sm text-neutral-500">
 						{hasActiveFilters ? "No messages match these filters" : config.emptyText}
 					</p>
