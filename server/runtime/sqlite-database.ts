@@ -42,35 +42,42 @@ class SqlitePreparedStatement {
 		return this.db.prepare(this.sql);
 	}
 
-	private isRead(): boolean {
-		return /^\s*(select|with|pragma|explain)\b/i.test(this.sql) || /\breturning\b/i.test(this.sql);
-	}
-
 	async first<T = Row>(column?: string): Promise<T | null> {
-		const row = this.statement().get(...this.params) as Row | undefined;
+		const statement = this.statement();
+		if (!statement.reader) {
+			statement.run(...this.params);
+			return null;
+		}
+		const row = statement.get(...this.params) as Row | undefined;
 		if (!row) return null;
 		return (column ? row[column] : row) as T;
 	}
 
 	async run<T = Row>() {
-		if (this.isRead()) {
-			const results = this.statement().all(...this.params) as T[];
-			return { results, success: true as const, meta: meta() };
+		// SQLite, not the SQL text, knows whether a statement returns rows and whether it writes.
+		const statement = this.statement();
+		if (!statement.reader) {
+			const info = statement.run(...this.params);
+			return { results: [] as T[], success: true as const, meta: meta(info) };
 		}
-		const info = this.statement().run(...this.params);
-		return { results: [] as T[], success: true as const, meta: meta(info) };
+		const results = statement.all(...this.params) as T[];
+		return { results, success: true as const, meta: statement.readonly ? meta() : meta(this.lastWrite()) };
 	}
 
 	async all<T = Row>() {
 		return this.run<T>();
 	}
 
+	private lastWrite(): Database.RunResult {
+		return this.db.prepare("SELECT changes() AS changes, last_insert_rowid() AS lastInsertRowid").get() as Database.RunResult;
+	}
+
 	async raw<T = unknown[]>(options?: { columnNames?: boolean }): Promise<T[]> {
-		if (!this.isRead()) {
-			this.statement().run(...this.params);
+		const statement = this.statement();
+		if (!statement.reader) {
+			statement.run(...this.params);
 			return [];
 		}
-		const statement = this.statement();
 		const rows = statement.raw(true).all(...this.params) as T[];
 		if (options?.columnNames) {
 			const names = statement.columns().map((column) => column.name) as unknown as T;
