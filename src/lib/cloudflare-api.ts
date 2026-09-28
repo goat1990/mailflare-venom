@@ -11,6 +11,7 @@ import {
 	getCloudflareAuthHint,
 	getEmailWorkerName,
 } from "@/lib/cloudflare-api-utils";
+import { decideEmailRoutingRuleAction, isWorkerRouteForAddress } from "@/lib/cloudflare-routing-utils";
 import { CloudflareApiError } from "@/lib/cloudflare-api-error";
 import { getZoneLookupCandidates } from "@/lib/domains/utils";
 export type { CfDnsRecord } from "@/lib/cloudflare-api.types";
@@ -210,20 +211,6 @@ export async function createEmailRoutingRuleToWorker(
 	);
 }
 
-function isWorkerRouteForAddress(
-	rule: CfEmailRoutingRule,
-	normalizedAddress: string,
-	workerName: string,
-): boolean {
-	const routesAddress = rule.matchers?.some(
-		(matcher) => matcher.type === "literal" && matcher.field === "to" && matcher.value?.toLowerCase() === normalizedAddress,
-	);
-	const sendsToWorker = rule.actions?.some(
-		(action) => action.type === "worker" && (action.value?.length ? action.value.includes(workerName) : true),
-	);
-	return Boolean(routesAddress && sendsToWorker);
-}
-
 export async function ensureEmailRoutingRuleToWorker(
 	env: CloudflareEnv,
 	zoneId: string,
@@ -233,10 +220,11 @@ export async function ensureEmailRoutingRuleToWorker(
 	const normalized = address.toLowerCase();
 	const workerName = getEmailWorkerName(env);
 	const rules = await listEmailRoutingRules(env, zoneId);
-	const existing = rules.find((rule) => isWorkerRouteForAddress(rule, normalized, workerName));
+	const decision = decideEmailRoutingRuleAction(rules, normalized, workerName);
 
-	if (existing?.enabled) return existing;
-	if (existing?.id) {
+	if (decision.action === "reuse") return decision.rule;
+	if (decision.action === "update" && decision.rule.id) {
+		const existing = decision.rule;
 		return cfRequest<CfEmailRoutingRule>(
 			env,
 			`/zones/${zoneId}/email/routing/rules/${existing.id}`,
