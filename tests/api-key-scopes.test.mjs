@@ -14,7 +14,7 @@ after(() => rmSync(outDir, { recursive: true, force: true }));
 await build({
 	stdin: {
 		contents: `
-			export { acceptedApiKeyScopes } from "./src/lib/api/scopes.ts";
+			export { acceptedApiKeyScopes, scopesFromCreateRequest } from "./src/lib/api/scopes.ts";
 			export { hasScope } from "./src/lib/api/key-auth.ts";
 		`,
 		resolveDir: root,
@@ -29,7 +29,7 @@ await build({
 	logLevel: "silent",
 });
 
-const { acceptedApiKeyScopes, hasScope } = await import(pathToFileURL(join(outDir, "entry.mjs")).href);
+const { acceptedApiKeyScopes, hasScope, scopesFromCreateRequest } = await import(pathToFileURL(join(outDir, "entry.mjs")).href);
 
 test("a key with admin scopes and mail scopes is accepted", () => {
 	assert.deepEqual(acceptedApiKeyScopes(["domains", "mcp:read", "mcp:draft", "mcp:organize"]), [
@@ -44,6 +44,28 @@ test("a key with admin scopes and mail scopes is accepted", () => {
 test("an unknown scope rejects the key", () => {
 	assert.equal(acceptedApiKeyScopes(["domains", "mcp:read", "not-a-scope"]), null);
 	assert.equal(acceptedApiKeyScopes([]), null);
+});
+
+test("a create payload with both groups is accepted", () => {
+	const payload = {
+		name: "ops",
+		scopes: ["domains", "mailboxes", "read", "send", "jmap", "mcp:read", "mcp:request-send"],
+	};
+	assert.deepEqual(scopesFromCreateRequest(payload.scopes), [
+		"domains",
+		"mailboxes",
+		"read",
+		"send",
+		"jmap",
+		"mcp:read",
+		"mcp:request-send",
+	]);
+	assert.deepEqual(scopesFromCreateRequest(["domains", "mcp:request-send"]), ["domains", "mcp:request-send"]);
+});
+
+test("a create payload with an unknown scope is rejected", () => {
+	const payload = { name: "ops", scopes: ["domains", "send", "not-a-scope"] };
+	assert.equal(scopesFromCreateRequest(payload.scopes), null);
 });
 
 test("request_send still does not send", () => {

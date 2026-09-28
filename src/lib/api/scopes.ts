@@ -20,3 +20,9 @@ export function acceptedApiKeyScopes(scopes: readonly string[]): string[] | null
 	}
 	return [...scopes];
 }
+
+export function scopesFromCreateRequest(scopes: readonly string[]): string[] | null {
+	const accepted = acceptedApiKeyScopes(scopes);
+	if (!accepted) return null;
+	return [...new Set(accepted)];
+}
