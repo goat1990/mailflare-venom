@@ -3,10 +3,9 @@ import { getDb } from "@/db";
 import { apiKeys, mcpKeyMailboxes, users } from "@/db/schema";
 import { parseScopes, verifyApiKey } from "@/lib/api-keys";
 import type { ApiAuthResult } from "@/lib/api/key-auth-types";
-import { ADMIN_API_KEY_SCOPES } from "@/lib/api/scopes";
+import { acceptedApiKeyScopes } from "@/lib/api/scopes";
 
 const LAST_USED_WRITE_INTERVAL_MS = 60_000;
-const ADMIN_SCOPES = new Set<string>(ADMIN_API_KEY_SCOPES);
 
 /**
  * Resolve an API key to its user and scopes. Framework-free so it can run in
@@ -24,18 +23,18 @@ export async function authenticateApiKeyValue(env: CloudflareEnv, key: string): 
 		if (!verifyApiKey(trimmed, candidate.keyHash)) continue;
 		const [user] = await db.select().from(users).where(eq(users.id, candidate.userId)).limit(1);
 		if (!user || user.disabled) continue;
+		const scopes = acceptedApiKeyScopes(parseScopes(candidate.scopes));
+		if (!scopes) return null;
 
 		const stale = new Date(Date.now() - LAST_USED_WRITE_INTERVAL_MS);
 		await db
 			.update(apiKeys)
 			.set({ lastUsedAt: new Date() })
 			.where(and(eq(apiKeys.id, candidate.id), or(isNull(apiKeys.lastUsedAt), lt(apiKeys.lastUsedAt, stale))));
-
-		const scopes = parseScopes(candidate.scopes);
 		const allowed = candidate.mailboxScopeEnabled
 			? await db.select({ mailboxId: mcpKeyMailboxes.mailboxId }).from(mcpKeyMailboxes).where(eq(mcpKeyMailboxes.keyId, candidate.id))
 			: null;
-		return { userId: user.id, email: user.email, scopes: scopes.some((scope) => ADMIN_SCOPES.has(scope)) ? scopes.filter((scope) => ADMIN_SCOPES.has(scope)) : scopes, mailboxIds: allowed?.map((row) => row.mailboxId) ?? null, user };
+		return { userId: user.id, email: user.email, scopes, mailboxIds: allowed?.map((row) => row.mailboxId) ?? null, user };
 	}
 	return null;
 }
