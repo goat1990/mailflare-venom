@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useSelectedMailbox } from "@/components/mailbox-provider";
 import { Copy, KeyRound, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,14 +21,18 @@ import { List, ListRow } from "@/components/ui/list";
 import { SectionRowSkeleton } from "@/components/page-skeletons";
 import { McpAgentInstructions } from "@/components/settings/mcp-agent-instructions";
 import { authFetch } from "@/lib/auth/client";
-import type { AdminApiKeyScope } from "@/lib/api/scopes-types";
+import { MCP_MAIL_SCOPES } from "@/lib/api/scopes";
 import type { ApiKey } from "./types";
-import { ADMIN_KEY_PERMISSIONS, parseApiKeyScopes } from "./utils";
+import { CREATE_KEY_PERMISSIONS, parseApiKeyScopes } from "./utils";
+
+const MCP_MAIL_SCOPE_SET = new Set<string>(MCP_MAIL_SCOPES);
 
 export default function ApiKeysPage() {
 	const qc = useQueryClient();
+	const { mailboxes } = useSelectedMailbox();
 	const [name, setName] = useState("");
-	const [scopes, setScopes] = useState<AdminApiKeyScope[]>(["domains"]);
+	const [scopes, setScopes] = useState<string[]>(["domains"]);
+	const [mailboxIds, setMailboxIds] = useState<string[]>([]);
 	const [mcpAllowed, setMcpAllowed] = useState(false);
 	const [createdMcpAllowed, setCreatedMcpAllowed] = useState(false);
 	const [newKey, setNewKey] = useState<string | null>(null);
@@ -48,12 +53,12 @@ export default function ApiKeysPage() {
 			const res = await authFetch("/api/admin/api-keys", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ name: name.trim(), scopes, mcpAllowed }),
+				body: JSON.stringify({ name: name.trim(), scopes, mcpAllowed, ...(mailboxIds.length ? { mailboxIds } : {}) }),
 			});
 			const json = (await res.json()) as { key?: string; error?: string };
 			if (!res.ok || !json.key) throw new Error(typeof json.error === "string" ? json.error : "Could not create API key");
 			setNewKey(json.key ?? null);
-			setCreatedMcpAllowed(mcpAllowed);
+			setCreatedMcpAllowed(mcpAllowed || scopes.some((scope) => MCP_MAIL_SCOPE_SET.has(scope)));
 			setCopied(false);
 			setName("");
 		},
@@ -91,11 +96,11 @@ export default function ApiKeysPage() {
 							<Label htmlFor="admin-key-name">Key name</Label>
 							<Input id="admin-key-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} placeholder="Production app" />
 						</div>
-						<label className="flex items-start gap-3 text-sm"><Checkbox checked={mcpAllowed} onChange={(event) => setMcpAllowed(event.target.checked)} /><span><strong>Allow MCP access</strong><span className="mt-1 block text-neutral-500">Use this key with an MCP client to manage only the admin areas selected below. It cannot read or send mail.</span></span></label>
+						<label className="flex items-start gap-3 text-sm"><Checkbox checked={mcpAllowed} onChange={(event) => setMcpAllowed(event.target.checked)} /><span><strong>Allow MCP access</strong><span className="mt-1 block text-neutral-500">Use this key with an MCP client for the permissions selected below.</span></span></label>
 						<fieldset className="space-y-2">
 							<legend className="text-sm font-medium">Permissions</legend>
 							<div className="space-y-2">
-								{ADMIN_KEY_PERMISSIONS.map((scope) => (
+								{CREATE_KEY_PERMISSIONS.map((scope) => (
 									<label key={scope.value} className="flex items-start gap-3 text-sm">
 										<Checkbox
 											checked={scopes.includes(scope.value)}
@@ -113,12 +118,22 @@ export default function ApiKeysPage() {
 								))}
 							</div>
 						</fieldset>
+						<fieldset className="space-y-2">
+							<legend className="text-sm font-medium">Mailboxes</legend>
+							{mailboxes.length === 0 ? <p className="text-sm text-neutral-500">No accessible mailboxes.</p> : mailboxes.map((mailbox) => (
+								<label key={mailbox.id} className="flex items-center gap-3 text-sm">
+									<Checkbox checked={mailboxIds.includes(mailbox.id)} onChange={(event) => setMailboxIds((current) => event.target.checked ? [...current, mailbox.id] : current.filter((id) => id !== mailbox.id))} />
+									{mailbox.localPart}@{mailbox.hostname}
+								</label>
+							))}
+							<p className="text-xs text-neutral-500">Leave this empty to let read, send, and JMAP follow every mailbox this account can open. MCP mail permissions need at least one mailbox.</p>
+						</fieldset>
 						{create.isError && (
 							<p className="text-sm text-red-600">{(create.error as Error).message}</p>
 						)}
 						<Button
 							onClick={() => create.mutate()}
-							disabled={!name.trim() || scopes.length === 0 || create.isPending}
+							disabled={!name.trim() || scopes.length === 0 || create.isPending || (scopes.some((scope) => MCP_MAIL_SCOPE_SET.has(scope)) && mailboxIds.length === 0)}
 						>
 							{create.isPending ? "Creating..." : "Create key"}
 						</Button>
