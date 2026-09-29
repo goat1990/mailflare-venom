@@ -3,6 +3,7 @@ import type { AppDatabase } from "@/db";
 import { domains, mailboxAliases, mailboxes } from "@/db/schema";
 import { deleteEmailRoutingRuleForAddress, ensureEmailRoutingRuleToWorker } from "@/lib/cloudflare-api";
 import { normalizeRecipientLocalPart } from "@/lib/email/recipient-address";
+import { listMailboxAddresses } from "@/lib/mailboxes/create-utils";
 import type { MailboxDomainAddressInput } from "./domain-addresses-types";
 
 export async function getMailboxAliasAddresses(
@@ -28,10 +29,15 @@ export async function getMailboxDomainAddresses(
 		.limit(1);
 	if (!primaryDomain) return [];
 
-	const primaryAddress = `${mailbox.localPart}@${primaryDomain.hostname}`.toLowerCase();
 	const aliasAddresses = await getMailboxAliasAddresses(db, mailbox.id);
 	if (!mailbox.useAllDomains) {
-		return [...new Set([primaryAddress, ...aliasAddresses])];
+		return listMailboxAddresses({
+			localPart: mailbox.localPart,
+			primaryHostname: primaryDomain.hostname,
+			useAllDomains: false,
+			otherHostnames: [],
+			aliasAddresses,
+		});
 	}
 
 	const availableDomains = await db
@@ -60,15 +66,15 @@ export async function getMailboxDomainAddresses(
 		].map((item) => item.domainId),
 	);
 
-	return [
-		...new Set([
-			primaryAddress,
-			...availableDomains
-				.filter((domain) => domain.id !== mailbox.domainId && !assignedDomainIds.has(domain.id))
-				.map((domain) => `${mailbox.localPart}@${domain.hostname}`.toLowerCase()),
-			...aliasAddresses,
-		]),
-	];
+	return listMailboxAddresses({
+		localPart: mailbox.localPart,
+		primaryHostname: primaryDomain.hostname,
+		useAllDomains: true,
+		otherHostnames: availableDomains
+			.filter((domain) => domain.id !== mailbox.domainId && !assignedDomainIds.has(domain.id))
+			.map((domain) => domain.hostname),
+		aliasAddresses,
+	});
 }
 
 export async function ensureMailboxDomainRouting(

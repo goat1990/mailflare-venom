@@ -3,6 +3,7 @@ import type { AppDatabase } from "@/db";
 import { domains, mailboxes } from "@/db/schema";
 import { ensureEmailRoutingRuleToWorker } from "@/lib/cloudflare-api";
 import { ensureMailboxDomainRouting } from "@/lib/mailboxes/domain-addresses";
+import { NEW_MAILBOX_USES_ALL_DOMAINS } from "@/lib/mailboxes/create-utils";
 import { newId } from "@/lib/ids";
 import { listAccessibleMailboxes } from "@/lib/mailboxes/access";
 import type { SessionUser } from "@/lib/auth/types";
@@ -38,12 +39,13 @@ export async function ensurePersonalMailbox(env: CloudflareEnv, db: AppDatabase,
 			localPart,
 			displayName: user.name || localPart,
 			type: "personal",
+			useAllDomains: NEW_MAILBOX_USES_ALL_DOMAINS,
 		});
 	} catch {
 		return current;
 	}
 	try {
-		await ensureMailboxDomainRouting(env, db, { id, domainId: domain.id, localPart, useAllDomains: true });
+		await ensureMailboxDomainRouting(env, db, { id, domainId: domain.id, localPart, useAllDomains: NEW_MAILBOX_USES_ALL_DOMAINS });
 	} catch {
 		// Mailbox visibility should not depend on routing API availability.
 	}
