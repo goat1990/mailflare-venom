@@ -8,6 +8,7 @@ import { newId } from "@/lib/ids";
 import { tracksAccountIdentity } from "@/lib/profile/identity-utils";
 import { mailboxSchema } from "@/lib/validators";
 import { ensureMailboxDomainRouting, getMailboxDomainAddresses } from "@/lib/mailboxes/domain-addresses";
+import { NEW_MAILBOX_USES_ALL_DOMAINS } from "@/lib/mailboxes/create-utils";
 import { ensurePersonalMailbox } from "./utils";
 
 export async function GET(request: Request) {
@@ -91,9 +92,10 @@ export async function POST(request: Request) {
 		localPart,
 		displayName: parsed.data.displayName,
 		type: mailboxType,
+		useAllDomains: NEW_MAILBOX_USES_ALL_DOMAINS,
 	});
 	try {
-		await ensureMailboxDomainRouting(env, db, { id, domainId: domain.id, localPart, useAllDomains: true });
+		await ensureMailboxDomainRouting(env, db, { id, domainId: domain.id, localPart, useAllDomains: NEW_MAILBOX_USES_ALL_DOMAINS });
 	} catch (err) {
 		await db.delete(mailboxes).where(eq(mailboxes.id, id));
 		const message = err instanceof Error ? err.message : "Failed to create Cloudflare routing rule";

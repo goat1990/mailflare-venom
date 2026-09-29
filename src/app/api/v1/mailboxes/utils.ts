@@ -7,6 +7,7 @@ import { authenticateAdminApiKey } from "@/lib/api/admin-auth";
 import { newId } from "@/lib/ids";
 import { mailboxSchema } from "@/lib/validators";
 import { ensureMailboxDomainRouting } from "@/lib/mailboxes/domain-addresses";
+import { NEW_MAILBOX_USES_ALL_DOMAINS } from "@/lib/mailboxes/create-utils";
 
 export async function GET(request: Request) {
 	const env = getEnv();
@@ -43,9 +44,9 @@ export async function POST(request: Request) {
 	const [alias] = await db.select({ id: mailboxAliases.id }).from(mailboxAliases).where(and(eq(mailboxAliases.domainId, domain.id), eq(mailboxAliases.localPart, localPart))).limit(1);
 	if (alias) return NextResponse.json({ error: "An alias already uses this address" }, { status: 409 });
 	const id = newId("mbx");
-	await db.insert(mailboxes).values({ id, userId: ownerUserId, domainId: domain.id, localPart, displayName: parsed.data.displayName, type: mailboxType });
+	await db.insert(mailboxes).values({ id, userId: ownerUserId, domainId: domain.id, localPart, displayName: parsed.data.displayName, type: mailboxType, useAllDomains: NEW_MAILBOX_USES_ALL_DOMAINS });
 	try {
-		await ensureMailboxDomainRouting(env, db, { id, domainId: domain.id, localPart, useAllDomains: true });
+		await ensureMailboxDomainRouting(env, db, { id, domainId: domain.id, localPart, useAllDomains: NEW_MAILBOX_USES_ALL_DOMAINS });
 	} catch (error) {
 		await db.delete(mailboxes).where(eq(mailboxes.id, id));
 		return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to create Cloudflare routing rule" }, { status: 502 });

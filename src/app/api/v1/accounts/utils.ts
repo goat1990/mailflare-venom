@@ -9,6 +9,7 @@ import { newId } from "@/lib/ids";
 import { createUserAccountSchema } from "@/lib/validators";
 import { ensureEmailRoutingRuleToWorker } from "@/lib/cloudflare-api";
 import { ensureMailboxDomainRouting } from "@/lib/mailboxes/domain-addresses";
+import { NEW_MAILBOX_USES_ALL_DOMAINS } from "@/lib/mailboxes/create-utils";
 import { accountListItemFromUser, getDomainForAdmin, getExistingMailbox } from "@/app/api/accounts/utils";
 
 export async function GET(request: Request) {
@@ -44,8 +45,8 @@ export async function POST(request: Request) {
 			createdByUserId: auth.userId,
 		}).returning();
 		const mailboxId = newId("mbx");
-		await db.insert(mailboxes).values({ id: mailboxId, userId, domainId: domain.id, localPart: username, displayName: username });
-		await ensureMailboxDomainRouting(env, db, { id: mailboxId, domainId: domain.id, localPart: username, useAllDomains: true });
+		await db.insert(mailboxes).values({ id: mailboxId, userId, domainId: domain.id, localPart: username, displayName: username, useAllDomains: NEW_MAILBOX_USES_ALL_DOMAINS });
+		await ensureMailboxDomainRouting(env, db, { id: mailboxId, domainId: domain.id, localPart: username, useAllDomains: NEW_MAILBOX_USES_ALL_DOMAINS });
 		return NextResponse.json({ account: accountListItemFromUser(account) }, { status: 201 });
 	} catch (error) {
 		await db.delete(users).where(eq(users.id, userId));

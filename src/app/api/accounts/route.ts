@@ -7,6 +7,7 @@ import { newId } from "@/lib/ids";
 import { createUserAccountSchema } from "@/lib/validators";
 import { ensureEmailRoutingRuleToWorker } from "@/lib/cloudflare-api";
 import { ensureMailboxDomainRouting } from "@/lib/mailboxes/domain-addresses";
+import { NEW_MAILBOX_USES_ALL_DOMAINS } from "@/lib/mailboxes/create-utils";
 import type { CreateUserAccountInput } from "./types";
 import {
 	accountListItemFromUser,
@@ -74,8 +75,9 @@ export async function POST(request: Request) {
 			domainId: domain.id,
 			localPart: username,
 			displayName: username,
+			useAllDomains: NEW_MAILBOX_USES_ALL_DOMAINS,
 		});
-		await ensureMailboxDomainRouting(access.env, db, { id: mailboxId, domainId: domain.id, localPart: username, useAllDomains: true });
+		await ensureMailboxDomainRouting(access.env, db, { id: mailboxId, domainId: domain.id, localPart: username, useAllDomains: NEW_MAILBOX_USES_ALL_DOMAINS });
 
 		return NextResponse.json({ account: accountListItemFromUser(account) }, { status: 201 });
 	} catch (error) {

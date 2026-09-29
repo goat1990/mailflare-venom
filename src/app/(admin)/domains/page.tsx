@@ -15,8 +15,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { List } from "@/components/ui/list";
-import { CheckCircle2, LoaderCircle, Plus } from "lucide-react";
+import { AlertTriangle, CheckCircle2, LoaderCircle, Plus } from "lucide-react";
 import { authFetch } from "@/lib/auth/client";
+import { domainAddBody, isMxConflict } from "@/lib/domains/add-request";
 import type { DnsAuthRecord, DnsStatusSummary, Domain, DomainDnsCache, DomainDnsView, DomainPreflight } from "./types";
 import DomainItemCard from "./DomainItemCard";
 import { SectionRowSkeleton } from "@/components/page-skeletons";
@@ -36,6 +37,7 @@ export default function DomainsPage() {
   const [enableSending, setEnableSending] = useState(false);
   const [domainCheckError, setDomainCheckError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [mxConflict, setMxConflict] = useState(false);
   const [setupRecord, setSetupRecord] = useState<DnsAuthRecord | null>(null);
   const [setupMessage, setSetupMessage] = useState<string | null>(null);
   const [expandedDomainId, setExpandedDomainId] = useState<string | null>(null);
@@ -59,7 +61,7 @@ export default function DomainsPage() {
   });
 
   const create = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (replaceMxRecords: boolean) => {
       const normalized = hostname.toLowerCase().trim();
       let checkedDomain = domainCheck;
       let sendingRequested = enableSending;
@@ -78,21 +80,25 @@ export default function DomainsPage() {
       const res = await authFetch("/api/domains", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          hostname: checkedDomain.hostname,
-          enableRouting: true,
-          enableSending: sendingRequested,
-        }),
+        body: JSON.stringify(domainAddBody(checkedDomain.hostname, sendingRequested, replaceMxRecords)),
       });
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? "Failed");
-      return json;
+      const json = (await res.json()) as { error?: string; code?: string };
+      if (!res.ok) {
+        if (isMxConflict(json.code) && !replaceMxRecords) return { mxConflict: true };
+        throw new Error(json.error ?? "Failed");
+      }
+      return { mxConflict: false };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
+      if (result.mxConflict) {
+        setMxConflict(true);
+        return;
+      }
       setHostname("");
       setDomainCheck(null);
       setEnableSending(false);
       setDomainCheckError(null);
+      setMxConflict(false);
       setCreateOpen(false);
       qc.invalidateQueries({ queryKey: ["domains"] });
     },
@@ -215,14 +221,20 @@ export default function DomainsPage() {
               : "Add the domains this server receives mail for. Open DNS on a domain to see the MX, SPF and DMARC records to create."}
           </p>
         </div>
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <Dialog
+          open={createOpen}
+          onOpenChange={(open) => {
+            setCreateOpen(open);
+            if (!open) setMxConflict(false);
+          }}
+        >
           <DialogTrigger asChild>
             <Button>
               <Plus className="h-4 w-4" />
               New domain
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-h-[calc(100vh-4rem)] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add domain</DialogTitle>
               <DialogDescription>
@@ -241,6 +253,7 @@ export default function DomainsPage() {
                     if (domainCheck?.hostname !== e.target.value.toLowerCase().trim()) {
                       setDomainCheck(null);
                       setEnableSending(false);
+                      setMxConflict(false);
                     }
                   }}
                   onBlur={() => void inspectDomain()}
@@ -282,6 +295,19 @@ export default function DomainsPage() {
                   {domainCheckError}
                 </p>
               )}
+              {mxConflict && (
+                <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-amber-900">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <p className="text-sm leading-6">
+                      Existing MX records deliver mail to another provider. Continuing deletes those records and replaces them with Cloudflare Email Routing, so the previous provider will stop receiving mail.
+                    </p>
+                  </div>
+                  <Button onClick={() => create.mutate(true)} disabled={create.isPending}>
+                    {create.isPending ? "Replacing MX records..." : "Delete MX records and continue"}
+                  </Button>
+                </div>
+              )}
               {create.isError && (
                 <div className="space-y-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
                   <p>{(create.error as Error).message}</p>
@@ -302,12 +328,14 @@ export default function DomainsPage() {
                   </div>
                 </div>
               )}
-              <Button
-                onClick={() => create.mutate()}
-                disabled={!hostname || domainChecking || create.isPending}
-              >
-                {create.isPending ? "Adding..." : "Add domain"}
-              </Button>
+              {!mxConflict && (
+                <Button
+                  onClick={() => create.mutate(false)}
+                  disabled={!hostname || domainChecking || create.isPending}
+                >
+                  {create.isPending ? "Adding..." : "Add domain"}
+                </Button>
+              )}
             </div>
           </DialogContent>
         </Dialog>
