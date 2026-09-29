@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "venommail": {
+      "url": "https://venommail.lebrongoat000-f2d.workers.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:VENOMMAIL_MCP_KEY}"
+      }
+    }
+  }
+}
