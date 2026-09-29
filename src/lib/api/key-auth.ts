@@ -4,6 +4,7 @@ import { apiKeys, mcpKeyMailboxes, users } from "@/db/schema";
 import { parseScopes, verifyApiKey } from "@/lib/api-keys";
 import type { ApiAuthResult } from "@/lib/api/key-auth-types";
 import { acceptedApiKeyScopes } from "@/lib/api/scopes";
+import { isFullControlGrant } from "@/lib/mcp/agent-access";
 
 const LAST_USED_WRITE_INTERVAL_MS = 60_000;
 
@@ -31,7 +32,7 @@ export async function authenticateApiKeyValue(env: CloudflareEnv, key: string): 
 			.update(apiKeys)
 			.set({ lastUsedAt: new Date() })
 			.where(and(eq(apiKeys.id, candidate.id), or(isNull(apiKeys.lastUsedAt), lt(apiKeys.lastUsedAt, stale))));
-		const allowed = candidate.mailboxScopeEnabled
+		const allowed = candidate.mailboxScopeEnabled && !isFullControlGrant(scopes)
 			? await db.select({ mailboxId: mcpKeyMailboxes.mailboxId }).from(mcpKeyMailboxes).where(eq(mcpKeyMailboxes.keyId, candidate.id))
 			: null;
 		return { userId: user.id, email: user.email, scopes, mailboxIds: allowed?.map((row) => row.mailboxId) ?? null, user };

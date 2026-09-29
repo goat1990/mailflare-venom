@@ -35,6 +35,7 @@ export default function ApiKeysPage() {
 	const [mailboxIds, setMailboxIds] = useState<string[]>([]);
 	const [mcpAllowed, setMcpAllowed] = useState(false);
 	const [createdMcpAllowed, setCreatedMcpAllowed] = useState(false);
+	const [createdDelivers, setCreatedDelivers] = useState(false);
 	const [newKey, setNewKey] = useState<string | null>(null);
 	const [copied, setCopied] = useState(false);
 	const [createOpen, setCreateOpen] = useState(false);
@@ -59,6 +60,7 @@ export default function ApiKeysPage() {
 			if (!res.ok || !json.key) throw new Error(typeof json.error === "string" ? json.error : "Could not create API key");
 			setNewKey(json.key ?? null);
 			setCreatedMcpAllowed(mcpAllowed || scopes.some((scope) => MCP_MAIL_SCOPE_SET.has(scope)));
+			setCreatedDelivers(scopes.includes("send") && scopes.some((scope) => MCP_MAIL_SCOPE_SET.has(scope)));
 			setCopied(false);
 			setName("");
 		},
@@ -126,19 +128,19 @@ export default function ApiKeysPage() {
 									{mailbox.localPart}@{mailbox.hostname}
 								</label>
 							))}
-							<p className="text-xs text-neutral-500">Leave this empty to let read, send, and JMAP follow every mailbox this account can open. MCP mail permissions need at least one mailbox.</p>
+							<p className="text-xs text-neutral-500">Leave this empty to follow every mailbox this account can open. A key with domain or mailbox management plus MCP mail uses every domain and mailbox you can access now, including domains added later, and ignores this list. Send mail delivers. Request send review does not.</p>
 						</fieldset>
 						{create.isError && (
 							<p className="text-sm text-red-600">{(create.error as Error).message}</p>
 						)}
 						<Button
 							onClick={() => create.mutate()}
-							disabled={!name.trim() || scopes.length === 0 || create.isPending || (scopes.some((scope) => MCP_MAIL_SCOPE_SET.has(scope)) && mailboxIds.length === 0)}
+							disabled={!name.trim() || scopes.length === 0 || create.isPending || (scopes.some((scope) => MCP_MAIL_SCOPE_SET.has(scope)) && !scopes.includes("domains") && !scopes.includes("mailboxes") && mailboxIds.length === 0)}
 						>
 							{create.isPending ? "Creating..." : "Create key"}
 						</Button>
 						</div>}
-						{newKey && <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-4"><code className="block break-all rounded bg-white p-2 text-xs">{newKey}</code>{createdMcpAllowed && <McpAgentInstructions mode="admin" apiKey={newKey} />}<div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(newKey).then(() => setCopied(true))}><Copy className="h-4 w-4" />{copied ? "Copied" : "Copy key"}</Button><Button type="button" size="sm" variant="ghost" onClick={() => { setCreateOpen(false); setNewKey(null); setCopied(false); }}>Done</Button></div></div>}
+						{newKey && <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-4"><code className="block break-all rounded bg-white p-2 text-xs">{newKey}</code>{createdMcpAllowed && <McpAgentInstructions mode="admin" apiKey={newKey} delivers={createdDelivers} />}<div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(newKey).then(() => setCopied(true))}><Copy className="h-4 w-4" />{copied ? "Copied" : "Copy key"}</Button><Button type="button" size="sm" variant="ghost" onClick={() => { setCreateOpen(false); setNewKey(null); setCopied(false); }}>Done</Button></div></div>}
 					</DialogContent>
 				</Dialog>
 			</div>

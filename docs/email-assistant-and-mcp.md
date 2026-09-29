@@ -10,4 +10,4 @@ To connect an external AI client, create a key in **Settings → API keys** and 
 
 MCP clients can use `update_draft` for the same draft fields and attachments, then `request_send` to create a human review for immediate or scheduled delivery. Attachment additions copy an existing file from an email in the key's permitted mailbox; local files are added through the composer.
 
-For management tools, create a separate MCP key in **Admin → API keys**. Its selected domain, account, and mailbox management permissions do not grant access to mail content. This page also provides copyable AI agent instructions after key creation.
+For management tools, create a key in **Admin → API keys**. A key that has domain or mailbox management together with MCP mail follows every domain and mailbox that owner can access at request time, including domains added later. Give that key **Send mail** and its `send` tool delivers. `mcp:request-send` still only opens a review. A mailbox list on a mail-only MCP key stays limited to the mailboxes chosen at creation.

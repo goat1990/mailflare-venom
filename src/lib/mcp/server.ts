@@ -7,9 +7,11 @@ import { listAccessibleMailboxes } from "@/lib/mailboxes/access";
 import { runEmailTool, EMAIL_TOOL_NAMES, emailToolDescriptions, emailToolSchemas } from "@/lib/agent/tools";
 import { editAgentDraft } from "@/lib/agent/edit-draft";
 import { requestAgentSend, getAgentSendRequest } from "@/lib/agent/approvals/utils";
+import { POST as deliverMail } from "@/app/api/v1/send/route";
 import type { EmailToolName } from "@/lib/agent/types";
 import type { McpPrincipal } from "./types";
 import { registerAdminMcpTools } from "./admin-tools";
+import { mcpDeliveryAllowed } from "./agent-access";
 
 const scopeByTool: Record<EmailToolName, string> = {
 	list_emails: "mcp:read", get_email: "mcp:read", get_thread: "mcp:read", search_emails: "mcp:read",
@@ -43,6 +45,16 @@ export function createMailflareMcpHandler(env: CloudflareEnv, principal: McpPrin
 			try { return output(await editAgentDraft({ env, user: principal.user, mailboxId, origin: "mcp" }, args)); }
 			catch (error) { return output({ error: error instanceof Error ? error.message : "Draft update failed" }, true); }
 		});
+		if (mcpDeliveryAllowed(principal.scopes)) {
+		server.registerTool("send", { description: "Deliver mail now from a mailbox this key can use. This does not open a review page.", inputSchema: z.object({ mailboxId: z.string().min(1), from: z.string().min(3), to: z.union([z.string().min(3), z.array(z.string().min(3)).min(1)]), cc: z.union([z.string(), z.array(z.string())]).optional(), bcc: z.union([z.string(), z.array(z.string())]).optional(), subject: z.string().min(1).max(500), text: z.string().optional(), html: z.string().optional() }) }, async (args) => {
+			if (!mcpDeliveryAllowed(principal.scopes) || !principal.mailboxIds.includes(args.mailboxId)) return output({ error: "Permission denied" }, true);
+			try {
+				const response = await deliverMail(new Request(new URL("/api/v1/send", baseUrl), { method: "POST", headers: { Authorization: authorization, "Content-Type": "application/json" }, body: JSON.stringify(args) }));
+				const data: unknown = await response.json().catch(() => ({ error: "Send failed" }));
+				return output(data, !response.ok);
+			} catch (error) { return output({ error: error instanceof Error ? error.message : "Send failed" }, true); }
+		});
+		}
 		server.registerTool("request_send", { description: "Request human review of a draft; this never sends", inputSchema: z.object({ mailboxId: z.string(), draftId: z.string(), expectedRevision: z.number().int().positive() }) }, async ({ mailboxId, draftId, expectedRevision }) => {
 			if (!principal.scopes.includes("mcp:request-send") || !principal.mailboxIds.includes(mailboxId)) return output({ error: "Permission denied" }, true);
 			const [draft] = await getDb(env).select({ mailboxId: messages.mailboxId }).from(messages).where(eq(messages.id, draftId)).limit(1);

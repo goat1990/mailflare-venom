@@ -1,9 +1,10 @@
 import { and, eq, lt, or, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
-import { apiKeys, mcpKeyMailboxes, users } from "@/db/schema";
+import { apiKeys, domains, mcpKeyMailboxes, users } from "@/db/schema";
 import { parseScopes, verifyApiKey } from "@/lib/api-keys";
-import { getMailboxAccessLevel } from "@/lib/mailboxes/access";
+import { listAccessibleMailboxes } from "@/lib/mailboxes/access";
 import { acceptedApiKeyScopes, ADMIN_API_KEY_SCOPES, MCP_MAIL_SCOPES } from "@/lib/api/scopes";
+import { ownerDomainsForGrant, resolveAgentAccess } from "./agent-access";
 import type { McpPrincipal } from "./types";
 
 const MCP_SCOPES = new Set<string>(MCP_MAIL_SCOPES);
@@ -23,9 +24,19 @@ export async function authenticateMcpRequest(env: CloudflareEnv, request: Reques
 		const [user] = await db.select().from(users).where(eq(users.id, candidate.userId)).limit(1);
 		if (!user || user.disabled) return null;
 		if (scopes.some((scope) => ADMIN_SCOPES.has(scope)) && user.role !== "admin") return null;
-		const allowed = scopes.some((scope) => MCP_SCOPES.has(scope)) ? await db.select({ mailboxId: mcpKeyMailboxes.mailboxId }).from(mcpKeyMailboxes).where(eq(mcpKeyMailboxes.keyId, candidate.id)) : [];
-		const mailboxIds: string[] = [];
-		for (const { mailboxId } of allowed) if ((await getMailboxAccessLevel(db, user, mailboxId))?.canRead) mailboxIds.push(mailboxId);
+		let mailboxIds: string[] = [];
+		if (scopes.some((scope) => MCP_SCOPES.has(scope))) {
+			const listed = await db.select({ mailboxId: mcpKeyMailboxes.mailboxId }).from(mcpKeyMailboxes).where(eq(mcpKeyMailboxes.keyId, candidate.id));
+			const accessible = await listAccessibleMailboxes(db, user);
+			const ownerMailboxes = accessible.map((row) => ({ id: row.id, domainId: row.domainId }));
+			const owned = await db.select({ id: domains.id }).from(domains).where(eq(domains.userId, user.id));
+			mailboxIds = resolveAgentAccess({
+				scopes,
+				listedMailboxIds: listed.map((row) => row.mailboxId),
+				ownerDomains: ownerDomainsForGrant(owned.map((row) => row.id), ownerMailboxes),
+				ownerMailboxes,
+			}).mailboxIds;
+		}
 		const stale = new Date(Date.now() - 60_000);
 		await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(and(eq(apiKeys.id, candidate.id), or(isNull(apiKeys.lastUsedAt), lt(apiKeys.lastUsedAt, stale))));
 		return { keyId: candidate.id, user, scopes, mailboxIds };
