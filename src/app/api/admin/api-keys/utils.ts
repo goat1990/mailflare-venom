@@ -7,6 +7,7 @@ import { agentSendApprovals, apiKeys, mcpKeyMailboxes } from "@/db/schema";
 import { requireSessionUser } from "@/lib/api/auth";
 import { generateApiKey, parseScopes, scopesToJson } from "@/lib/api-keys";
 import { ADMIN_API_KEY_SCOPES, MCP_MAIL_SCOPES, scopesFromCreateRequest } from "@/lib/api/scopes";
+import { isFullControlGrant } from "@/lib/mcp/agent-access";
 import { newId } from "@/lib/ids";
 import { getMailboxAccessLevel } from "@/lib/mailboxes/access";
 import { hasValidSessionMutationOrigin } from "@/lib/auth/origin";
@@ -52,7 +53,8 @@ export async function POST(request: Request) {
 	const scopes = scopesFromCreateRequest(parsed.data.scopes);
 	if (!scopes) return NextResponse.json({ error: "Unknown scope" }, { status: 400 });
 	const db = getDb(access.env);
-	const mailboxIds = [...new Set(parsed.data.mailboxIds ?? [])];
+	const fullControl = isFullControlGrant(scopes);
+	const mailboxIds = fullControl ? [] : [...new Set(parsed.data.mailboxIds ?? [])];
 	for (const mailboxId of mailboxIds) {
 		if (!(await getMailboxAccessLevel(db, access.user!, mailboxId))?.canRead) return NextResponse.json({ error: "Mailbox not found" }, { status: 403 });
 	}
