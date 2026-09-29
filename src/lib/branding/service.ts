@@ -2,18 +2,19 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { appSettings } from "@/db/schema";
 import type { Branding } from "./types";
-import { getLicenseEntitlements } from "@/lib/licenses/service";
 
 export const APP_SETTINGS_ID = "default";
 export const DEFAULT_APP_NAME = "Venommail";
 export const BRANDING_ICON_KEY = "branding/app-icon";
 
-export async function getBranding(env: CloudflareEnv): Promise<Branding> {
-	const entitlements = await getLicenseEntitlements(env);
-	if (!entitlements.canCustomizeBranding) {
-		return { appName: DEFAULT_APP_NAME, hasCustomIcon: false, canCustomizeBranding: false };
-	}
+/** `app_settings.app_name` defaults to the old product name. That is not a saved brand. */
+function displayAppName(stored: string | null | undefined): string {
+	const name = stored?.trim() ?? "";
+	if (!name || name === "Mailflare") return DEFAULT_APP_NAME;
+	return name;
+}
 
+export async function getBranding(env: CloudflareEnv): Promise<Branding> {
 	try {
 		const [settings] = await getDb(env)
 			.select()
@@ -21,7 +22,7 @@ export async function getBranding(env: CloudflareEnv): Promise<Branding> {
 			.where(eq(appSettings.id, APP_SETTINGS_ID))
 			.limit(1);
 		return {
-			appName: settings?.appName || DEFAULT_APP_NAME,
+			appName: displayAppName(settings?.appName),
 			hasCustomIcon: !!settings?.iconKey,
 			canCustomizeBranding: true,
 		};
@@ -34,9 +35,6 @@ export async function updateBranding(
 	env: CloudflareEnv,
 	input: { appName: string; icon?: File | null },
 ): Promise<Branding> {
-	if (!(await getLicenseEntitlements(env)).canCustomizeBranding) {
-		throw new Error("A Pro or Team license is required to customize branding");
-	}
 	let iconKey: string | undefined;
 	if (input.icon) {
 		iconKey = BRANDING_ICON_KEY;

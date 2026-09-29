@@ -112,9 +112,9 @@ Mailbox authorization is separate from user role and goes through `src/lib/mailb
 
 `messages.status` is a free-text column driving the folder views: `received` (inbox), `sent`, `draft`, `spam`, `trash`, `archived`. Orthogonal to that are `starred`, `snoozedUntil`, and `folderId` (user-created folders in the `folders` table). A "folder" route under `src/app/(dashboard)/` is usually a status filter, not a table.
 
-### Licensing gates branding
+### Branding
 
-Pro/Team keys are validated against Paymug (`src/lib/licenses/`); only a one-way key hash is stored. Without an active license the app falls back to the default name, icon, and favicon, and custom branding is unavailable. `getLicenseEntitlements` is the gate.
+The default name, icon, and favicon are Venommail. Admins can change them from Branding. `app_settings.app_name` still defaults to `Mailflare` in the schema because agent settings share that row; `getBranding` treats an empty name or that default as Venommail. The `license_settings` table remains for existing databases and backups and is not consulted.
 
 ### Schema updates
 
