@@ -3,9 +3,8 @@ import { eq } from "drizzle-orm";
 import { getEnv } from "@/lib/cloudflare";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
-import { authenticateAdminApiKey, canManageAdminAccounts } from "@/lib/api/admin-auth";
+import { authenticateAdminApiKey } from "@/lib/api/admin-auth";
 import { updateManagedAccountSchema } from "@/lib/validators";
-import { getLicenseEntitlements } from "@/lib/licenses/service";
 import { selectAccountById, updateAccountCredentials } from "@/app/api/accounts/[id]/utils";
 import { deleteUserSessions } from "@/lib/auth/session";
 import type { AdminAccountRouteParams } from "./types";
@@ -14,7 +13,6 @@ export async function GET(request: Request, { params }: AdminAccountRouteParams)
 	const env = getEnv();
 	const auth = await authenticateAdminApiKey(env, request, "accounts");
 	if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-	if (!(await canManageAdminAccounts(env))) return NextResponse.json({ error: "A Team license is required to manage accounts" }, { status: 403 });
 	const { id } = await params;
 	const account = await selectAccountById(getDb(env), id);
 	if (!account || (account.id !== auth.userId && account.createdByUserId !== auth.userId)) return NextResponse.json({ error: "Account not found" }, { status: 404 });
@@ -29,15 +27,12 @@ export async function PATCH(request: Request, { params }: AdminAccountRouteParam
 	const env = getEnv();
 	const auth = await authenticateAdminApiKey(env, request, "accounts");
 	if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-	if (!(await canManageAdminAccounts(env))) return NextResponse.json({ error: "A Team license is required to manage accounts" }, { status: 403 });
 	const { id } = await params;
 	const db = getDb(env);
 	const account = await selectAccountById(db, id);
 	if (!account || (account.id !== auth.userId && account.createdByUserId !== auth.userId)) return NextResponse.json({ error: "Account not found" }, { status: 404 });
 	const parsed = updateManagedAccountSchema.safeParse(await request.json().catch(() => null));
 	if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-	const canForwardEmail = (await getLicenseEntitlements(env)).canForwardEmail;
-	if (!canForwardEmail && parsed.data.forwardingEmail && parsed.data.forwardingEmail !== account.forwardingEmail) return NextResponse.json({ error: "A Pro or Team license is required for email forwarding" }, { status: 403 });
 	if (auth.userId !== account.id && parsed.data.forwardingEmail !== undefined && parsed.data.forwardingEmail !== account.forwardingEmail) {
 		return NextResponse.json({ error: "Only the account owner can change forwarding" }, { status: 403 });
 	}

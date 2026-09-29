@@ -9,7 +9,6 @@ import { hasValidSessionMutationOrigin } from "@/lib/auth/origin";
 import { verifyPassword } from "@/lib/auth/password";
 import { revokePasswordResetTokens } from "@/lib/auth/password-reset";
 import { profileChangeNeedsCurrentPassword } from "@/lib/auth/password-reset-utils";
-import { getLicenseEntitlements } from "@/lib/licenses/service";
 import { syncPersonalIdentity } from "@/lib/profile/sync";
 import type { UpdateProfileInput } from "./types";
 import { parseUpdateProfileRequest } from "./utils";
@@ -32,10 +31,6 @@ export async function PATCH(request: Request) {
 	}
 
 	const db = getDb(env);
-	const canForwardEmail = (await getLicenseEntitlements(env)).canForwardEmail;
-	if (!canForwardEmail && parsed.forwardingEmail && parsed.forwardingEmail !== user.forwardingEmail) {
-		return NextResponse.json({ error: "A Pro or Team license is required for email forwarding" }, { status: 403 });
-	}
 	const forwardingEmail = parsed.forwardingEmail === undefined ? user.forwardingEmail : parsed.forwardingEmail;
 	if (profileChangeNeedsCurrentPassword(user, { resetEmail: parsed.resetEmail, forwardingEmail })) {
 		if (!parsed.currentPassword || !verifyPassword(parsed.currentPassword, user.passwordHash)) {
@@ -60,7 +55,7 @@ export async function PATCH(request: Request) {
 			name: parsed.name,
 			resetEmail: parsed.resetEmail,
 			forwardingEmail,
-			canForwardEmail,
+			canForwardEmail: true,
 		},
 	});
 }

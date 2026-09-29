@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, BadgeDollarSign, Bot, DatabaseBackup, Globe2, KeyRound, Mail, Palette, Route, Settings, Users } from "lucide-react";
+import { Activity, Bot, DatabaseBackup, Globe2, KeyRound, Mail, Palette, Route, Settings, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const sections = [
@@ -28,15 +28,9 @@ const sections = [
 		icon: Palette,
 	},
 	{
-		href: "/licenses",
-		title: "Licenses",
-		description: "Compare Pro and Team one-time licenses.",
-		icon: BadgeDollarSign,
-	},
-	{
 		href: "/accounts",
 		title: "Accounts",
-		description: "Add and manage user accounts with a Team license.",
+		description: "Add and manage user accounts.",
 		icon: Users,
 	},
 	{

@@ -7,7 +7,6 @@ import {
   Mail,
   Settings,
   Palette,
-  BadgeDollarSign,
   Users,
   Route,
   Webhook,
@@ -17,7 +16,6 @@ import {
 import { cn } from "@/lib/utils";
 import { NavItem } from "./components-nav";
 import { SidebarFooter } from "./sidebar-footer";
-import { useBranding } from "./branding-provider";
 import { SidebarHeader } from "./sidebar-header";
 import { useSidebar } from "./sidebar-state";
 
@@ -49,13 +47,11 @@ const sections = [
     label: "Product",
     links: [
       { href: "/branding", label: "Branding", icon: Palette },
-      { href: "/licenses", label: "Licenses", icon: BadgeDollarSign },
     ],
   },
 ];
 
 export function AdminNav({ className }: { className?: string }) {
-  const branding = useBranding();
   const { minimal } = useSidebar();
 
   return (
@@ -63,15 +59,11 @@ export function AdminNav({ className }: { className?: string }) {
       <SidebarHeader href="/inbox" label="Admin" />
       <div className={cn("space-y-4", minimal && "space-y-2 pl-1")}>
         {sections.map((section, sectionIndex) => {
-          const links = section.links.filter(
-            (link) =>
-              link.href !== "/branding" || branding.canCustomizeBranding,
-          );
-          if (links.length === 0) return null;
+          if (section.links.length === 0) return null;
 
           return (
             // The first section has no label, so fall back to its first href for a stable key.
-            <section key={section.label ?? links[0].href}>
+            <section key={section.label ?? section.links[0].href}>
               {minimal && sectionIndex > 0 && <hr className="mx-3 mb-3 border-neutral-200/70" />}
               {!minimal && section.label && (
                 <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
@@ -79,7 +71,7 @@ export function AdminNav({ className }: { className?: string }) {
                 </p>
               )}
               <div className="space-y-1">
-                {links.map((link) => (
+                {section.links.map((link) => (
                   <NavItem link={link} key={link.href} />
                 ))}
               </div>

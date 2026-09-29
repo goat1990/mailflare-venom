@@ -8,7 +8,6 @@ import { hasValidSessionMutationOrigin } from "@/lib/auth/origin";
 import { verifyPassword } from "@/lib/auth/password";
 import { profileChangeNeedsCurrentPassword } from "@/lib/auth/password-reset-utils";
 import { getEnv } from "@/lib/cloudflare";
-import { getLicenseEntitlements } from "@/lib/licenses/service";
 import type { UpdateForwardingEmailInput } from "./types";
 import { parseUpdateForwardingEmailRequest } from "./utils";
 
@@ -27,9 +26,6 @@ export async function PATCH(request: Request) {
 
 	if (!hasValidSessionMutationOrigin(request)) {
 		return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
-	}
-	if (!(await getLicenseEntitlements(env)).canForwardEmail) {
-		return NextResponse.json({ error: "A Pro or Team license is required for email forwarding" }, { status: 403 });
 	}
 	if (profileChangeNeedsCurrentPassword(user, { resetEmail: user.resetEmail, forwardingEmail: input.forwardingEmail })) {
 		if (!input.currentPassword || !verifyPassword(input.currentPassword, user.passwordHash)) {

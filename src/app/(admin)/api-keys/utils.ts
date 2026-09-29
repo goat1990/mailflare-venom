@@ -1,6 +1,6 @@
 export const CREATE_KEY_PERMISSIONS: { value: string; label: string; description: string }[] = [
 	{ value: "domains", label: "Manage domains", description: "Add and remove domains, and manage their DNS setup." },
-	{ value: "accounts", label: "Manage accounts", description: "Create and update accounts. Requires a Team license." },
+	{ value: "accounts", label: "Manage accounts", description: "Create and update accounts." },
 	{ value: "mailboxes", label: "Manage mailboxes", description: "Create, update, and remove mailboxes." },
 	{ value: "read", label: "Read mail", description: "Read messages through the API." },
 	{ value: "send", label: "Send mail", description: "Send messages through the API." },

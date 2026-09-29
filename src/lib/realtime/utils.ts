@@ -1,7 +1,6 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { mailboxAccess, mailboxes } from "@/db/schema";
-import { isTeamMailboxSharingEnabled } from "@/lib/mailboxes/access-utils";
 import type { NewMessageNotification, AgentDraftNotification } from "./types";
 
 export function getSessionTokenFromRequest(request: Request): string | undefined {
@@ -30,7 +29,7 @@ export async function getMailboxNotificationUserIds(
 		.from(mailboxes)
 		.where(eq(mailboxes.id, mailboxId))
 		.limit(1);
-	const sharedUserIds = mailboxRows[0]?.type === "shared" && await isTeamMailboxSharingEnabled(db)
+	const sharedUserIds = mailboxRows[0]?.type === "shared"
 		? (await db
 			.select({ userId: mailboxAccess.userId })
 			.from(mailboxAccess)
