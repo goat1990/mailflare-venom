@@ -46,7 +46,7 @@ A [Paid Worker](https://developers.cloudflare.com/workers/platform/pricing/) pla
 
 Getting started takes three steps:
 
-1. **Deploy the app.** From this repository, run `npm run deploy` and keep the Worker name as `mailflare`. The app will not work correctly under another Worker name.
+1. **Deploy the app.** From this repository, run `npm run deploy` and keep the Worker name as `venommail`. The app will not work correctly under another Worker name.
 2. **Complete setup.** Open the deployed app and follow `/setup` to check the installation and create your admin account.
 3. **Connect your domain.** Add a domain managed by the same Cloudflare account. Venommail configures its email routing and helps you create the first mailbox.
 

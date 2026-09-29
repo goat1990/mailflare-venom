@@ -53,7 +53,7 @@ Also confirm that automatic backups are enabled under **Admin → Backups** and 
 
 Confirm that:
 
-- The deployed Worker is named `mailflare`.
-- `services[].service` in `wrangler.jsonc` is also `mailflare`.
+- The deployed Worker is named `venommail`.
+- `services[].service` in `wrangler.jsonc` is also `venommail`.
 - Email Routing is enabled for the domain in Cloudflare.
 - The mailbox has an Email Routing rule pointing to the Worker.

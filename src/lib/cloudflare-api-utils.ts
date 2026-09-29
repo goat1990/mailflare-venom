@@ -60,5 +60,5 @@ export function getCloudflareAuthHint(errors: CfApiError[]) {
 
 /** The Worker Email Routing rules deliver to: `CF_EMAIL_WORKER_NAME`, else the name in wrangler.jsonc. */
 export function getEmailWorkerName(env: CloudflareEnv): string {
-	return (env as CloudflareEnv & { CF_EMAIL_WORKER_NAME?: string }).CF_EMAIL_WORKER_NAME?.trim() || "mailflare";
+	return (env as CloudflareEnv & { CF_EMAIL_WORKER_NAME?: string }).CF_EMAIL_WORKER_NAME?.trim() || "venommail";
 }
