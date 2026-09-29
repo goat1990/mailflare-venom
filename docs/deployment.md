@@ -6,11 +6,11 @@ This guide covers Cloudflare deployment, runtime configuration, database backups
 
 Set up Mailflare in three steps:
 
-1. **Deploy the app:** from this repository, run `npm run deploy`, keep the Worker name `mailflare`, and provide the required `CF_TOKEN`.
+1. **Deploy the app:** from this repository, run `npm run deploy`, keep the Worker name `venommail`, and provide the required `CF_TOKEN`.
 2. **Complete setup:** open the deployed app and follow `/setup` to check the installation and create the first admin account.
 3. **Connect your domain:** add a domain managed by the same Cloudflare account. Mailflare configures email routing and, when available and selected, email sending before helping you create the first mailbox.
 
-The Worker name must remain `mailflare`. Before starting, create the required `CF_TOKEN` with **Zone Read**, **DNS Edit**, **Email Routing Edit**, and **Email Routing Rules Write** permissions for every domain you plan to connect. DNS Edit lets the confirmed setup flow replace conflicting MX records. Add **Email Sending Edit** when Mailflare should send email; it is optional for receive-only domains.
+The Worker name must remain `venommail`. Before starting, create the required `CF_TOKEN` with **Zone Read**, **DNS Edit**, **Email Routing Edit**, and **Email Routing Rules Write** permissions for every domain you plan to connect. DNS Edit lets the confirmed setup flow replace conflicting MX records. Add **Email Sending Edit** when Mailflare should send email; it is optional for receive-only domains.
 
 ## Step 1: Deploy mailflare
 
@@ -22,7 +22,7 @@ npm run deploy
 ```
 
 1. Sign in to the Cloudflare account that owns the domain you want to use.
-2. Keep the Worker name exactly `mailflare`. Do not rename it. Email Routing rules target that name.
+2. Keep the Worker name exactly `venommail`. Do not rename it. Email Routing rules target that name.
 3. Set `CF_TOKEN` as a Worker secret before the app serves mail.
 4. Wait for Wrangler to finish provisioning and deploying the Worker.
 
@@ -36,7 +36,7 @@ Paste only the token secret into `CF_TOKEN`. Do not include the word `Bearer` an
 
 ## Step 2: Complete mailflare setup
 
-1. Open the URL of the deployed `mailflare` Worker.
+1. Open the URL of the deployed `venommail` Worker.
 2. Go to `/setup` if Mailflare does not take you there automatically.
 3. Let Mailflare check the required Cloudflare configuration and initialize the empty D1 database.
 4. Create the first admin account when prompted.
