@@ -8,6 +8,7 @@ import { authFetch } from "@/lib/auth/client";
 import { dispatchProfileNameChanged } from "@/lib/profile/name-client";
 import { ProfileAvatarForm } from "./profile-avatar-form";
 import type { ProfileFormProps, ProfileFormResponse } from "./types";
+import { updateRecoveryEmail } from "./utils";
 
 export function ProfileForm({
   initialName,
@@ -18,6 +19,7 @@ export function ProfileForm({
   const [resetEmail, setResetEmail] = useState(initialResetEmail);
   const [savedName, setSavedName] = useState(initialName);
   const [savedResetEmail, setSavedResetEmail] = useState(initialResetEmail);
+  const [currentPassword, setCurrentPassword] = useState("");
   const [profileStatus, setProfileStatus] = useState<string | null>(null);
   const [recoveryStatus, setRecoveryStatus] = useState<string | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -75,7 +77,14 @@ export function ProfileForm({
     setSavingRecovery(true);
     setRecoveryStatus(null);
     try {
-      await saveProfile(savedName, resetEmail);
+      const saved = await updateRecoveryEmail(
+        savedName,
+        resetEmail,
+        currentPassword,
+      );
+      setResetEmail(saved);
+      setSavedResetEmail(saved);
+      setCurrentPassword("");
       setRecoveryStatus("Saved");
     } catch (error) {
       setRecoveryStatus(
@@ -160,6 +169,17 @@ export function ProfileForm({
             onChange={(event) => setResetEmail(event.target.value)}
             type="email"
             placeholder="recovery@example.com"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="recoveryCurrentPassword">Current password</Label>
+          <Input
+            id="recoveryCurrentPassword"
+            type="password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+            required
           />
         </div>
         <div className="flex items-center gap-3">

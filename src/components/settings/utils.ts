@@ -4,6 +4,7 @@ import { authFetch } from "@/lib/auth/client";
 import type {
 	CurrentMailboxFormResponse,
 	ForwardingEmailResponse,
+	ProfileFormResponse,
 	MailboxAutoReplyResponse,
 	MailboxAutoReplySettings,
 	MailboxSignatureResponse,
@@ -65,6 +66,19 @@ export async function updateForwardingEmail(forwardingEmail: string, currentPass
 		throw new Error(typeof data.error === "string" ? data.error : "Failed to update forwarding email");
 	}
 	return data.forwardingEmail ?? "";
+}
+
+export async function updateRecoveryEmail(name: string, resetEmail: string, currentPassword: string): Promise<string> {
+	const res = await authFetch("/api/settings/profile", {
+		method: "PATCH",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ name, resetEmail, currentPassword }),
+	});
+	const data = (await res.json()) as ProfileFormResponse;
+	if (!res.ok) {
+		throw new Error(typeof data.error === "string" ? data.error : "Failed to update recovery email");
+	}
+	return data.user?.resetEmail ?? "";
 }
 
 export async function updateMailboxSignature(mailboxId: string, signature: string): Promise<string> {

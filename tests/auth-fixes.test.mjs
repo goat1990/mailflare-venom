@@ -19,7 +19,7 @@ await build({
 			export { matchTotp, totp, totpCounter, totpCounterAllowed, verifyTotp } from "./src/lib/auth/totp.ts";
 			export { loginAllowedAfterLimiterError } from "./src/lib/auth/rate-limit.ts";
 			export { forwardingDestinationForMailbox } from "./src/lib/email/account-forwarding.ts";
-			export { updateForwardingEmail } from "./src/components/settings/utils.ts";
+			export { updateForwardingEmail, updateRecoveryEmail } from "./src/components/settings/utils.ts";
 			export { filterToSql } from "./src/lib/jmap/email-query.ts";
 		`,
 		resolveDir: root,
@@ -47,6 +47,7 @@ const {
 	loginAllowedAfterLimiterError,
 	forwardingDestinationForMailbox,
 	updateForwardingEmail,
+	updateRecoveryEmail,
 	filterToSql,
 } = await import(pathToFileURL(join(outDir, "entry.mjs")).href);
 
@@ -91,6 +92,16 @@ test("the forwarding request sends the current password the route requires", asy
 	});
 	assert.equal(await updateForwardingEmail("copy@example.com", "secret-pass"), "copy@example.com");
 	assert.deepEqual(body, { forwardingEmail: "copy@example.com", currentPassword: "secret-pass" });
+});
+
+test("the recovery email request sends the current password the route requires", async (t) => {
+	let body;
+	t.mock.method(globalThis, "fetch", async (_url, init) => {
+		body = JSON.parse(init.body);
+		return Response.json({ user: { name: body.name, resetEmail: body.resetEmail } });
+	});
+	assert.equal(await updateRecoveryEmail("Ada", "recovery@example.com", "secret-pass"), "recovery@example.com");
+	assert.deepEqual(body, { name: "Ada", resetEmail: "recovery@example.com", currentPassword: "secret-pass" });
 });
 
 test("a TOTP code cannot be reused inside the acceptance window", async () => {
