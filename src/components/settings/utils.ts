@@ -54,11 +54,11 @@ export async function loadAccountSettings(): Promise<Required<AccountSettingsRes
 	return data.user;
 }
 
-export async function updateForwardingEmail(forwardingEmail: string): Promise<string> {
+export async function updateForwardingEmail(forwardingEmail: string, currentPassword: string): Promise<string> {
 	const res = await authFetch("/api/settings/forwarding", {
 		method: "PATCH",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ forwardingEmail }),
+		body: JSON.stringify({ forwardingEmail, currentPassword }),
 	});
 	const data = (await res.json()) as ForwardingEmailResponse;
 	if (!res.ok) {

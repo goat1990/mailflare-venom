@@ -10,6 +10,7 @@ import { updateForwardingEmail } from "./utils";
 export function ForwardingEmailForm({ initialForwardingEmail }: ForwardingEmailFormProps) {
 	const [forwardingEmail, setForwardingEmail] = useState(initialForwardingEmail);
 	const [savedForwardingEmail, setSavedForwardingEmail] = useState(initialForwardingEmail);
+	const [currentPassword, setCurrentPassword] = useState("");
 	const [status, setStatus] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 
@@ -18,9 +19,10 @@ export function ForwardingEmailForm({ initialForwardingEmail }: ForwardingEmailF
 		setSaving(true);
 		setStatus(null);
 		try {
-			const saved = await updateForwardingEmail(forwardingEmail);
+			const saved = await updateForwardingEmail(forwardingEmail, currentPassword);
 			setForwardingEmail(saved);
 			setSavedForwardingEmail(saved);
+			setCurrentPassword("");
 			setStatus("Saved");
 		} catch (error) {
 			setStatus(error instanceof Error ? error.message : "Failed to update forwarding email");
@@ -43,6 +45,17 @@ export function ForwardingEmailForm({ initialForwardingEmail }: ForwardingEmailF
 				<p className="text-xs leading-5 text-neutral-500">
 					Incoming mail will also be sent to this verified Cloudflare Email Routing destination.
 				</p>
+			</div>
+			<div className="space-y-2">
+				<Label htmlFor="forwardingCurrentPassword">Current password</Label>
+				<Input
+					id="forwardingCurrentPassword"
+					type="password"
+					autoComplete="current-password"
+					value={currentPassword}
+					onChange={(event) => setCurrentPassword(event.target.value)}
+					required
+				/>
 			</div>
 			<div className="flex items-center gap-3">
 				<Button type="submit" disabled={saving || forwardingEmail.trim() === savedForwardingEmail}>
